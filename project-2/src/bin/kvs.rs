@@ -1,7 +1,8 @@
 use clap::{App, AppSettings, Arg, SubCommand};
+use kvs::Result;
 use std::process::exit;
 
-fn main() {
+fn main() -> Result<()> {
     let matches = App::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
@@ -46,4 +47,5 @@ fn main() {
         }
         _ => unreachable!(),
     }
+    Ok(panic!())
 }
