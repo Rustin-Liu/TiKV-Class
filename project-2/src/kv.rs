@@ -1,10 +1,12 @@
 use std::collections::HashMap;
-use std::path::{PathBuf, Path};
+use std::path::{Path, PathBuf};
 
-use crate::Result;
+use crate::{KvsError, Result};
+use std::fs;
 use std::fs::{File, OpenOptions};
-use std::{fs, io};
-use std::io::{Seek, Write, BufWriter, SeekFrom, Read, BufReader};
+use std::io::{BufRead, BufReader, BufWriter, Write};
+
+use serde::{Deserialize, Serialize};
 
 /// The `KvStore` stores string key/value pairs.
 ///
@@ -24,14 +26,15 @@ use std::io::{Seek, Write, BufWriter, SeekFrom, Read, BufReader};
 pub struct KvStore {
     // path for the log.
     path: PathBuf,
-    // the file reader
-    reader: BufReaderWithPos<File>,
-    // writer of the current log
-    writer: BufWriterWithPos<File>,
+    // the file reader.
+    reader: BufReader<File>,
+    // writer of the current log.
+    writer: BufWriter<File>,
+    // the kv data.
+    data: HashMap<String, String>,
 }
 
 impl KvStore {
-
     /// Opens a `KvStore` with the given path.
     ///
     /// This will create a new directory if the given one does not exist.
@@ -43,14 +46,16 @@ impl KvStore {
         let path = path.into();
         fs::create_dir_all(&path)?;
 
-        let mut reader = BufReaderWithPos::new(File::open(&path.join(".log"))?)?;
+        let writer = new_log_file(&path.join("kvs.log"))?;
 
-        let writer = new_log_file(&path)?;
+        let mut reader = BufReader::new(File::open(&path.join("kvs.log"))?);
 
+        let data = load(&mut reader)?;
         Ok(KvStore {
             path,
             reader,
             writer,
+            data,
         })
     }
 
@@ -63,8 +68,9 @@ impl KvStore {
     /// It propagates I/O or serialization errors during writing the log.
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
         let cmd = Command::set(key, value);
-        let pos = self.writer.pos;
-        serde_json::to_writer(&mut self.writer, &cmd)?;
+        let cmd = serde_json::to_string(&cmd)?;
+        self.writer.write_fmt(format_args!("{}\n", cmd));
+        self.writer.flush();
         Ok(())
     }
 
@@ -72,37 +78,59 @@ impl KvStore {
     ///
     /// Returns `None` if the given key does not exist.
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
-            let pos = self.reader.seek(SeekFrom::Start(cmd_pos.pos))?;
-            let cmd_reader = self.reader.read();
-            if let Command::Set { value, .. } = serde_json::from_reader(cmd_reader)? {
-                Ok(Some(value))
-            } else {
-                Err(KvsError::UnexpectedCommandType)
-            }
+        if self.data.contains_key(&key) {
+            Ok(self.data.get(&key).cloned())
+        } else {
+            Ok(None)
+        }
     }
 
     /// Remove a given key.
     pub fn remove(&mut self, key: String) -> Result<()> {
-        self.map.remove(&key);
-        Ok(())
+        if self.data.contains_key(&key) {
+            let cmd = Command::remove(key.clone());
+            let cmd = serde_json::to_string(&cmd)?;
+            self.writer.write_fmt(format_args!("{}\n", cmd));
+            self.writer.flush();
+            self.data.remove(&key);
+            Ok(())
+        } else {
+            Err(KvsError::KeyNotFound)
+        }
     }
 }
 
 /// Create a new log file.
 ///
 /// Returns the writer to the log.
-fn new_log_file(
-    path: &Path,
-) -> Result<BufWriterWithPos<File>> {
-    let path = log_path(&path, gen);
-    let writer = BufWriterWithPos::new(
+fn new_log_file(path: &Path) -> Result<BufWriter<File>> {
+    let writer = BufWriter::new(
         OpenOptions::new()
             .create(true)
             .write(true)
             .append(true)
             .open(&path)?,
-    )?;
+    );
     Ok(writer)
+}
+
+/// Load the whole log file and store hash data.
+///
+/// Returns hash data.
+fn load(reader: &mut BufReader<File>) -> Result<HashMap<String, String>> {
+    let mut result = HashMap::new();
+    for line in reader.lines() {
+        let cmd: Command = serde_json::from_str(&line?)?;
+        match cmd {
+            Command::Set { key, value } => {
+                result.insert(key, value);
+            }
+            Command::Remove { key } => {
+                result.remove(&key);
+            }
+        }
+    }
+    Ok(result)
 }
 
 /// Struct representing a command
@@ -119,69 +147,5 @@ impl Command {
 
     fn remove(key: String) -> Command {
         Command::Remove { key }
-    }
-}
-
-struct BufReaderWithPos<R: Read + Seek> {
-    reader: BufReader<R>,
-    pos: u64,
-}
-
-impl<R: Read + Seek> BufReaderWithPos<R> {
-    fn new(mut inner: R) -> Result<Self> {
-        let pos = inner.seek(SeekFrom::Current(0))?;
-        Ok(BufReaderWithPos {
-            reader: BufReader::new(inner),
-            pos,
-        })
-    }
-}
-
-impl<R: Read + Seek> Read for BufReaderWithPos<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let len = self.reader.read(buf)?;
-        self.pos += len as u64;
-        Ok(len)
-    }
-}
-
-impl<R: Read + Seek> Seek for BufReaderWithPos<R> {
-    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        self.pos = self.reader.seek(pos)?;
-        Ok(self.pos)
-    }
-}
-
-struct BufWriterWithPos<W: Write + Seek> {
-    writer: BufWriter<W>,
-    pos: u64,
-}
-
-impl<W: Write + Seek> BufWriterWithPos<W> {
-    fn new(mut inner: W) -> Result<Self> {
-        let pos = inner.seek(SeekFrom::Current(0))?;
-        Ok(BufWriterWithPos {
-            writer: BufWriter::new(inner),
-            pos,
-        })
-    }
-}
-
-impl<W: Write + Seek> Write for BufWriterWithPos<W> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let len = self.writer.write(buf)?;
-        self.pos += len as u64;
-        Ok(len)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.writer.flush()
-    }
-}
-
-impl<W: Write + Seek> Seek for BufWriterWithPos<W> {
-    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        self.pos = self.writer.seek(pos)?;
-        Ok(self.pos)
     }
 }
