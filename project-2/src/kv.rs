@@ -24,10 +24,6 @@ use serde::{Deserialize, Serialize};
 /// # }
 /// ```
 pub struct KvStore {
-    // path for the log.
-    path: PathBuf,
-    // the file reader.
-    reader: BufReader<File>,
     // writer of the current log.
     writer: BufWriter<File>,
     // the kv data.
@@ -51,12 +47,7 @@ impl KvStore {
         let mut reader = BufReader::new(File::open(&path.join("kvs.log"))?);
 
         let data = load(&mut reader)?;
-        Ok(KvStore {
-            path,
-            reader,
-            writer,
-            data,
-        })
+        Ok(KvStore { writer, data })
     }
 
     /// Sets the value of a string key to a string.
@@ -69,8 +60,8 @@ impl KvStore {
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
         let cmd = Command::set(key, value);
         let cmd = serde_json::to_string(&cmd)?;
-        self.writer.write_fmt(format_args!("{}\n", cmd));
-        self.writer.flush();
+        self.writer.write_fmt(format_args!("{}\n", cmd))?;
+        self.writer.flush()?;
         Ok(())
     }
 
@@ -90,8 +81,8 @@ impl KvStore {
         if self.data.contains_key(&key) {
             let cmd = Command::remove(key.clone());
             let cmd = serde_json::to_string(&cmd)?;
-            self.writer.write_fmt(format_args!("{}\n", cmd));
-            self.writer.flush();
+            self.writer.write_fmt(format_args!("{}\n", cmd))?;
+            self.writer.flush()?;
             self.data.remove(&key);
             Ok(())
         } else {
@@ -133,7 +124,7 @@ fn load(reader: &mut BufReader<File>) -> Result<HashMap<String, String>> {
     Ok(result)
 }
 
-/// Struct representing a command
+/// Struct representing a command.
 #[derive(Serialize, Deserialize, Debug)]
 enum Command {
     Set { key: String, value: String },
