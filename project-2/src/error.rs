@@ -13,6 +13,9 @@ pub enum KvsError {
     /// Removing non-existent key error
     #[fail(display = "Key not found")]
     KeyNotFound,
+    /// Incorrect command type error.
+    #[fail(display = "Incorrect command type")]
+    IncorrectCommandType,
 }
 
 impl From<io::Error> for KvsError {

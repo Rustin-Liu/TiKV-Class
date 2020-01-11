@@ -22,4 +22,8 @@
 `I think lifetime of the KvStore maybe a better choice.`
 
 ### Part 4: Reading from the log
- 
+
+### Part 5: Storing log pointers in the index
+
+### Part 6: Stateless vs. stateful KvStore 
+`My database is stateful database.`
