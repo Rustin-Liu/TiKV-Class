@@ -42,9 +42,11 @@ impl KvStore {
         let path = path.into();
         fs::create_dir_all(&path)?;
 
-        let writer = new_log_file(&path.join("kvs.log"))?;
+        let path = &path.join("kvs.log");
 
-        let mut reader = BufReader::new(File::open(&path.join("kvs.log"))?);
+        let writer = new_log_file(path)?;
+
+        let mut reader = BufReader::new(File::open(path)?);
 
         let data = load(&mut reader)?;
         Ok(KvStore { writer, data })
