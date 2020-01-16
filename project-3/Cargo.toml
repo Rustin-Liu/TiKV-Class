@@ -1,0 +1,18 @@
+[package]
+name = "kvs"
+version = "0.1.0"
+authors = ["Rustin Liu <rustin.liu@gmail.com>"]
+description = "A key-value store"
+edition = "2018"
+
+[dependencies]
+clap = "2.32.0"
+failure = "0.1.5"
+serde = "1.0.104"
+serde_json = "1.0.44"
+
+[dev-dependencies]
+assert_cmd = "0.11.0"
+predicates = "1.0.0"
+tempfile = "3.0.7"
+walkdir = "2.2.7"
