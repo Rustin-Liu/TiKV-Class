@@ -1,6 +1,9 @@
-use crate::{KvsError, Result};
 use slog::*;
+use std::io::{BufRead, BufReader, BufWriter, Read};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
+use std::str;
+
+use crate::{KvsError, Result};
 
 /// The server of key value store.
 pub struct KvsServer {
@@ -32,7 +35,16 @@ impl KvsServer {
 
     /// Handle the stream.
     pub fn handle(&mut self, tcp: TcpStream) -> Result<()> {
-        info!(self.logger, "Get TCP stream success.");
+        let peer_addr = tcp.peer_addr()?;
+        let mut reader = BufReader::new(&tcp);
+        let msg: &mut [u8] = &mut [0x0; 400];
+        reader.read(msg).unwrap();
+        info!(
+            self.logger,
+            "Get TCP stream msg {} form {}.",
+            str::from_utf8(msg).unwrap(),
+            peer_addr
+        );
         Ok(())
     }
 }
