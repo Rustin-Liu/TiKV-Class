@@ -1,5 +1,6 @@
 use clap::AppSettings;
 use kvs::Result;
+use slog::*;
 use std::net::SocketAddr;
 use std::process::exit;
 use structopt::StructOpt;
@@ -27,6 +28,8 @@ struct Opt {
 }
 
 fn main() {
+    let plain = slog_term::PlainSyncDecorator::new(std::io::stdout());
+    Logger::root(slog_term::FullFormat::new(plain).build().fuse(), o!());
     let opt = Opt::from_args();
     if let Err(e) = run(opt) {
         eprintln!("{}", e);
