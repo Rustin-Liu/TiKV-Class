@@ -1,5 +1,5 @@
 use clap::AppSettings;
-use kvs::Result;
+use kvs::{KvsServer, Result};
 use slog::*;
 use std::net::SocketAddr;
 use std::process::exit;
@@ -28,8 +28,6 @@ struct Opt {
 }
 
 fn main() {
-    let plain = slog_term::PlainSyncDecorator::new(std::io::stdout());
-    Logger::root(slog_term::FullFormat::new(plain).build().fuse(), o!());
     let opt = Opt::from_args();
     if let Err(e) = run(opt) {
         eprintln!("{}", e);
@@ -38,5 +36,11 @@ fn main() {
 }
 
 fn run(opt: Opt) -> Result<()> {
-    unimplemented!()
+    let decorator = slog_term::TermDecorator::new().build();
+    let drain = slog_term::FullFormat::new(decorator).build().fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    let logger = slog::Logger::root(drain, o!());
+    let server = KvsServer::new(logger);
+    server.init(opt.addr);
+    Ok(())
 }
