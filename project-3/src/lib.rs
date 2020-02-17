@@ -9,4 +9,6 @@ pub use server::KvsServer;
 mod client;
 mod error;
 mod kv;
+mod request;
+mod response;
 mod server;

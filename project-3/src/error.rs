@@ -16,6 +16,9 @@ pub enum KvsError {
     /// Incorrect command type error.
     #[fail(display = "Incorrect command type")]
     IncorrectCommandType,
+    /// Response error.
+    #[fail(display = "{}", _0)]
+    ResponseError(String),
 }
 
 impl From<io::Error> for KvsError {

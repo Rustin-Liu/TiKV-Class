@@ -1,8 +1,11 @@
+use serde_json::Deserializer;
 use slog::*;
-use std::io::{BufRead, BufReader, BufWriter, Read};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::str;
 
+use crate::request::Request;
+use crate::response::{GetResponse, RemoveResponse, SetResponse};
 use crate::{KvsError, Result};
 
 /// The server of key value store.
@@ -36,15 +39,48 @@ impl KvsServer {
     /// Handle the stream.
     pub fn handle(&mut self, tcp: TcpStream) -> Result<()> {
         let peer_addr = tcp.peer_addr()?;
-        let mut reader = BufReader::new(&tcp);
-        let msg: &mut [u8] = &mut [0x0; 400];
-        reader.read(msg).unwrap();
-        info!(
-            self.logger,
-            "Get TCP stream msg {} form {}.",
-            str::from_utf8(msg).unwrap(),
-            peer_addr
-        );
+        debug!(self.logger, "Get the tcp stream form {}", peer_addr);
+        let reader = BufReader::new(&tcp);
+        let mut writer = BufWriter::new(&tcp);
+        let request_reader = Deserializer::from_reader(reader).into_iter::<Request>();
+
+        for request_item in request_reader {
+            match request_item? {
+                Request::Get { key } => {
+                    info!(
+                        self.logger,
+                        "Get get {} command form client {}", key, peer_addr
+                    );
+                    serde_json::to_writer(
+                        &mut writer,
+                        &GetResponse::Err("unimplemented".to_string()),
+                    )?;
+                    writer.flush()?;
+                }
+                Request::Set { key, value } => {
+                    info!(
+                        self.logger,
+                        "Get set {}:{} command form client {}", key, value, peer_addr
+                    );
+                    serde_json::to_writer(
+                        &mut writer,
+                        &SetResponse::Err("unimplemented".to_string()),
+                    )?;
+                    writer.flush()?;
+                }
+                Request::Remove { key } => {
+                    info!(
+                        self.logger,
+                        "Get remove key {} command form client {}", key, peer_addr
+                    );
+                    serde_json::to_writer(
+                        &mut writer,
+                        &RemoveResponse::Err("unimplemented".to_string()),
+                    )?;
+                    writer.flush()?;
+                }
+            }
+        }
         Ok(())
     }
 }

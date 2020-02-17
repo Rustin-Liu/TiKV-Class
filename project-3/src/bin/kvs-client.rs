@@ -75,10 +75,21 @@ fn main() {
 fn run(opt: Opt) -> Result<()> {
     match opt.command {
         Command::Get { key, addr } => {
-            let client = KvsClient::init(addr)?;
+            let mut client = KvsClient::init(addr)?;
+            if let Some(value) = client.get(key)? {
+                println!("{}", value);
+            } else {
+                println!("Key not found");
+            }
         }
-        Command::Set { key, value, addr } => unimplemented!(),
-        Command::Remove { key, addr } => unimplemented!(),
+        Command::Set { key, value, addr } => {
+            let mut client = KvsClient::init(addr)?;
+            client.set(key, value)?
+        }
+        Command::Remove { key, addr } => {
+            let mut client = KvsClient::init(addr)?;
+            client.remove(key)?
+        }
     }
     Ok(())
 }
