@@ -6,17 +6,18 @@ use std::str;
 
 use crate::request::Request;
 use crate::response::{GetResponse, RemoveResponse, SetResponse};
-use crate::{KvsError, Result};
+use crate::{KvEngine, KvsError, Result};
 
 /// The server of key value store.
-pub struct KvsServer {
+pub struct KvsServer<E: KvEngine> {
     logger: Logger,
+    engine: E,
 }
 
-impl KvsServer {
+impl<E: KvEngine> KvsServer<E> {
     /// Create a serve with logger.
-    pub fn new(logger: Logger) -> Self {
-        KvsServer { logger }
+    pub fn new(logger: Logger, engine: E) -> Self {
+        KvsServer { logger, engine }
     }
 
     /// Init the listener.
@@ -51,10 +52,11 @@ impl KvsServer {
                         self.logger,
                         "Get get {} command form client {}", key, peer_addr
                     );
-                    serde_json::to_writer(
-                        &mut writer,
-                        &GetResponse::Err("unimplemented".to_string()),
-                    )?;
+                    let mut response = match self.engine.get(key) {
+                        Ok(value) => GetResponse::Ok(value),
+                        Err(e) => GetResponse::Err(format!("{}", e)),
+                    };
+                    serde_json::to_writer(&mut writer, &response)?;
                     writer.flush()?;
                 }
                 Request::Set { key, value } => {
@@ -62,10 +64,11 @@ impl KvsServer {
                         self.logger,
                         "Get set {}:{} command form client {}", key, value, peer_addr
                     );
-                    serde_json::to_writer(
-                        &mut writer,
-                        &SetResponse::Err("unimplemented".to_string()),
-                    )?;
+                    let mut response = match self.engine.set(key, value) {
+                        Ok(_) => SetResponse::Ok(()),
+                        Err(e) => SetResponse::Err(format!("{}", e)),
+                    };
+                    serde_json::to_writer(&mut writer, &response)?;
                     writer.flush()?;
                 }
                 Request::Remove { key } => {
@@ -73,10 +76,11 @@ impl KvsServer {
                         self.logger,
                         "Get remove key {} command form client {}", key, peer_addr
                     );
-                    serde_json::to_writer(
-                        &mut writer,
-                        &RemoveResponse::Err("unimplemented".to_string()),
-                    )?;
+                    let mut response = match self.engine.remove(key) {
+                        Ok(_) => RemoveResponse::Ok(()),
+                        Err(e) => RemoveResponse::Err(format!("{}", e)),
+                    };
+                    serde_json::to_writer(&mut writer, &response)?;
                     writer.flush()?;
                 }
             }

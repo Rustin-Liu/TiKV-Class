@@ -29,7 +29,7 @@ enum Command {
             long,
             help = "Sets the server address",
             value_name = "ADDRESS_VALUE_NAME",
-            default_value = "DEFAULT_LISTENING_ADDRESS",
+            raw(default_value = "DEFAULT_LISTENING_ADDRESS"),
             parse(try_from_str)
         )]
         addr: SocketAddr,
@@ -44,7 +44,7 @@ enum Command {
             long,
             help = "Sets the server address",
             value_name = "ADDRESS_VALUE_NAME",
-            default_value = "DEFAULT_LISTENING_ADDRESS",
+            raw(default_value = "DEFAULT_LISTENING_ADDRESS"),
             parse(try_from_str)
         )]
         addr: SocketAddr,
@@ -57,7 +57,7 @@ enum Command {
             long,
             help = "Sets the server address",
             value_name = "ADDRESS_VALUE_NAME",
-            default_value = "DEFAULT_LISTENING_ADDRESS",
+            raw(default_value = "DEFAULT_LISTENING_ADDRESS"),
             parse(try_from_str)
         )]
         addr: SocketAddr,
