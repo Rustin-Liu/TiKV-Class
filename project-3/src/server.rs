@@ -1,12 +1,11 @@
 use serde_json::Deserializer;
 use slog::*;
-use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::io::{ BufReader, BufWriter, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
-use std::str;
 
 use crate::request::Request;
 use crate::response::{GetResponse, RemoveResponse, SetResponse};
-use crate::{KvEngine, KvsError, Result};
+use crate::{KvEngine, Result};
 
 /// The server of key value store.
 pub struct KvsServer<E: KvEngine> {
@@ -52,7 +51,7 @@ impl<E: KvEngine> KvsServer<E> {
                         self.logger,
                         "Get get {} command form client {}", key, peer_addr
                     );
-                    let mut response = match self.engine.get(key) {
+                    let response = match self.engine.get(key) {
                         Ok(value) => GetResponse::Ok(value),
                         Err(e) => GetResponse::Err(format!("{}", e)),
                     };
@@ -64,7 +63,7 @@ impl<E: KvEngine> KvsServer<E> {
                         self.logger,
                         "Get set {}:{} command form client {}", key, value, peer_addr
                     );
-                    let mut response = match self.engine.set(key, value) {
+                    let response = match self.engine.set(key, value) {
                         Ok(_) => SetResponse::Ok(()),
                         Err(e) => SetResponse::Err(format!("{}", e)),
                     };
@@ -76,7 +75,7 @@ impl<E: KvEngine> KvsServer<E> {
                         self.logger,
                         "Get remove key {} command form client {}", key, peer_addr
                     );
-                    let mut response = match self.engine.remove(key) {
+                    let response = match self.engine.remove(key) {
                         Ok(_) => RemoveResponse::Ok(()),
                         Err(e) => RemoveResponse::Err(format!("{}", e)),
                     };

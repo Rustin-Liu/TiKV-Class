@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate clap;
 
-use kvs::{KvEngine, My_KvStore, KvsServer, Result, SledKvs};
+use kvs::{KvEngine, MyKvStore, KvsServer, Result, SledKvs};
 use slog::*;
 use std::env::current_dir;
 use std::net::SocketAddr;
@@ -70,20 +70,20 @@ fn run(opt: Opt) -> Result<()> {
     info!(logger, "Storage engine: {}", engine);
     info!(logger, "Listening on {}", opt.addr);
 
-    let mut current_dir_path = current_dir()?;
+    let current_dir_path = current_dir()?;
 
-    write_engine_meta(current_dir_path.clone(), engine);
+    write_engine_meta(current_dir_path.clone(), engine)?;
 
     match engine {
         Engine::kvs => start_engine(
-            KvsServer::new(logger, My_KvStore::open(current_dir_path)?),
+            KvsServer::new(logger, MyKvStore::open(current_dir_path)?),
             opt.addr,
         ),
         Engine::sled => start_engine(
             KvsServer::new(logger, SledKvs::new(sled::open(current_dir_path)?)),
             opt.addr,
         ),
-    };
+    }?;
     Ok(())
 }
 
@@ -93,8 +93,9 @@ fn start_engine<E: KvEngine>(server: KvsServer<E>, addr: SocketAddr) -> Result<(
 }
 
 // Write engine name to meta file.
-fn write_engine_meta(current_dir_path: PathBuf, engine_name: Engine) {
-    fs::write(current_dir_path.join("meta"), format!("{}", engine_name));
+fn write_engine_meta(current_dir_path: PathBuf, engine_name: Engine)-> Result<()> {
+    fs::write(current_dir_path.join("meta"), format!("{}", engine_name))?;
+    Ok(())
 }
 
 // Get current engine name from meta file.
@@ -106,6 +107,6 @@ fn current_engine() -> Result<Option<Engine>> {
 
     match fs::read_to_string(engine)?.parse() {
         Ok(engine) => Ok(Some(engine)),
-        Err(e) => Ok(None),
+        Err(_) => Ok(None),
     }
 }

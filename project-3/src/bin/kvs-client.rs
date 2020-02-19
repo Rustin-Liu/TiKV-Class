@@ -28,7 +28,7 @@ enum Command {
         #[structopt(
             long,
             help = "Sets the server address",
-            value_name = "ADDRESS_VALUE_NAME",
+            raw(value_name = "ADDRESS_VALUE_NAME"),
             raw(default_value = "DEFAULT_LISTENING_ADDRESS"),
             parse(try_from_str)
         )]
@@ -43,7 +43,7 @@ enum Command {
         #[structopt(
             long,
             help = "Sets the server address",
-            value_name = "ADDRESS_VALUE_NAME",
+            raw(value_name = "ADDRESS_VALUE_NAME"),
             raw(default_value = "DEFAULT_LISTENING_ADDRESS"),
             parse(try_from_str)
         )]
@@ -56,7 +56,7 @@ enum Command {
         #[structopt(
             long,
             help = "Sets the server address",
-            value_name = "ADDRESS_VALUE_NAME",
+            raw(value_name = "ADDRESS_VALUE_NAME"),
             raw(default_value = "DEFAULT_LISTENING_ADDRESS"),
             parse(try_from_str)
         )]
