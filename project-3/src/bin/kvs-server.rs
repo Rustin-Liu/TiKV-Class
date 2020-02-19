@@ -1,11 +1,13 @@
 #[macro_use]
 extern crate clap;
 
-use kvs::{KvStore, KvsServer, Result};
+use kvs::{KvEngine, KvStore, KvsServer, Result, SledKvs};
 use slog::*;
-use std::env;
+use std::env::current_dir;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::process::exit;
+use std::{env, fs};
 use structopt::StructOpt;
 
 const DEFAULT_LISTENING_ADDRESS: &str = "127.0.0.1:4000";
@@ -41,10 +43,17 @@ struct Opt {
 
 fn main() {
     let mut opt = Opt::from_args();
-    if opt.engine.is_none() {
-        opt.engine = Some(Engine::kvs);
-    }
-    if let Err(e) = run(opt) {
+    let res = current_engine().and_then(move |engine| {
+        if opt.engine.is_none() {
+            opt.engine = engine;
+        }
+        if engine.is_some() && opt.engine != engine {
+            eprintln!("Error: the wrong engine name");
+            exit(1);
+        }
+        run(opt)
+    });
+    if let Err(e) = res {
         eprintln!("{}", e);
         exit(1);
     }
@@ -55,13 +64,48 @@ fn run(opt: Opt) -> Result<()> {
     let drain = slog_term::FullFormat::new(decorator).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
     let logger = slog::Logger::root(drain, o!());
-    let server = match opt.engine.unwrap_or(Engine::kvs) {
-        Engine::kvs => KvsServer::new(logger, KvStore::open(env::current_dir()?)?),
-        _ => {
-            error!(logger, "Wrong engine!");
-            exit(1);
-        }
+    let engine = opt.engine.unwrap_or(Engine::kvs);
+
+    info!(logger, "kvs-server {}", env!("CARGO_PKG_VERSION"));
+    info!(logger, "Storage engine: {}", engine);
+    info!(logger, "Listening on {}", opt.addr);
+
+    let mut current_dir_path = current_dir()?;
+
+    write_engine_meta(current_dir_path.clone(), engine);
+
+    match engine {
+        Engine::kvs => start_engine(
+            KvsServer::new(logger, KvStore::open(current_dir_path)?),
+            opt.addr,
+        ),
+        Engine::sled => start_engine(
+            KvsServer::new(logger, SledKvs::new(sled::open(current_dir_path)?)),
+            opt.addr,
+        ),
     };
-    server.init(opt.addr);
     Ok(())
+}
+
+// Start engine with address.
+fn start_engine<E: KvEngine>(server: KvsServer<E>, addr: SocketAddr) -> Result<()> {
+    server.start(addr)
+}
+
+// Write engine name to meta file.
+fn write_engine_meta(current_dir_path: PathBuf, engine_name: Engine) {
+    fs::write(current_dir_path.join("meta"), format!("{}", engine_name));
+}
+
+// Get current engine name from meta file.
+fn current_engine() -> Result<Option<Engine>> {
+    let engine = current_dir()?.join("meta");
+    if !engine.exists() {
+        return Ok(None);
+    }
+
+    match fs::read_to_string(engine)?.parse() {
+        Ok(engine) => Ok(Some(engine)),
+        Err(e) => Ok(None),
+    }
 }

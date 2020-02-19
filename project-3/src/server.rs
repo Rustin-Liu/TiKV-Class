@@ -21,7 +21,7 @@ impl<E: KvEngine> KvsServer<E> {
     }
 
     /// Init the listener.
-    pub fn init<A: ToSocketAddrs>(mut self, addr: A) -> Result<()> {
+    pub fn start<A: ToSocketAddrs>(mut self, addr: A) -> Result<()> {
         let listener = TcpListener::bind(addr)?;
         info!(self.logger, "Server started...");
         for stream in listener.incoming() {
