@@ -1,6 +1,6 @@
 use serde_json::Deserializer;
 use slog::*;
-use std::io::{ BufReader, BufWriter, Write};
+use std::io::{BufReader, BufWriter, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 
 use crate::request::Request;

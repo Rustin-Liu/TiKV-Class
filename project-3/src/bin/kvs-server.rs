@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate clap;
 
-use kvs::{KvEngine, MyKvStore, KvsServer, Result, SledKvs};
+use kvs::{KvEngine, KvsServer, MyKvStore, Result, SledKvs};
 use slog::*;
 use std::env::current_dir;
 use std::net::SocketAddr;
@@ -72,7 +72,7 @@ fn run(opt: Opt) -> Result<()> {
 
     let current_dir_path = current_dir()?;
 
-    write_engine_meta(current_dir_path.clone(), engine)?;
+    write_engine_meta(&current_dir_path, engine)?;
 
     match engine {
         Engine::kvs => start_engine(
@@ -93,7 +93,7 @@ fn start_engine<E: KvEngine>(server: KvsServer<E>, addr: SocketAddr) -> Result<(
 }
 
 // Write engine name to meta file.
-fn write_engine_meta(current_dir_path: PathBuf, engine_name: Engine)-> Result<()> {
+fn write_engine_meta(current_dir_path: &PathBuf, engine_name: Engine) -> Result<()> {
     fs::write(current_dir_path.join("meta"), format!("{}", engine_name))?;
     Ok(())
 }
