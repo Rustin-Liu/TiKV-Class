@@ -25,22 +25,22 @@ fn write_bench(c: &mut Criterion) {
         },
         iter::once(()),
     )
-        .with_function("sled", |b, _| {
-            b.iter_batched(
-                || {
-                    let current_dir_path = current_dir().unwrap();
-                    SledKvs::new(sled::open(current_dir_path).unwrap())
-                },
-                |mut sled_kvs| {
-                    for i in 1..100 {
-                        sled_kvs
-                            .set(format!("key{}", i), "value".to_string())
-                            .unwrap();
-                    }
-                },
-                BatchSize::SmallInput,
-            )
-        });
+    .with_function("sled", |b, _| {
+        b.iter_batched(
+            || {
+                let current_dir_path = current_dir().unwrap();
+                SledKvs::new(sled::open(current_dir_path).unwrap())
+            },
+            |mut sled_kvs| {
+                for i in 1..100 {
+                    sled_kvs
+                        .set(format!("key{}", i), "value".to_string())
+                        .unwrap();
+                }
+            },
+            BatchSize::SmallInput,
+        )
+    });
     c.bench("write_bench", bench);
 }
 
@@ -50,7 +50,7 @@ fn read_bench(c: &mut Criterion) {
         |b, i| {
             let current_dir_path = current_dir().unwrap();
             let mut store = MyKvStore::open(current_dir_path).unwrap();
-            for key_i in 1.. *i {
+            for key_i in 1..*i {
                 store
                     .set(format!("key{}", key_i), "value".to_string())
                     .unwrap();
@@ -62,23 +62,23 @@ fn read_bench(c: &mut Criterion) {
                     .unwrap();
             })
         },
-        vec![1<<10],
+        vec![1 << 10],
     )
-        .with_function("sled", |b, i| {
-            let current_dir_path = current_dir().unwrap();
-            let mut sled_kvs = SledKvs::new(sled::open(current_dir_path).unwrap());
-            for key_i in 1..*i {
-                sled_kvs
-                    .set(format!("key{}", key_i), "value".to_string())
-                    .unwrap();
-            }
-            let mut rng = StdRng::from_rng(thread_rng()).unwrap();
-            b.iter(|| {
-                sled_kvs
-                    .get(format!("key{}", rng.gen_range(1, *i)))
-                    .unwrap();
-            })
-        });
+    .with_function("sled", |b, i| {
+        let current_dir_path = current_dir().unwrap();
+        let mut sled_kvs = SledKvs::new(sled::open(current_dir_path).unwrap());
+        for key_i in 1..*i {
+            sled_kvs
+                .set(format!("key{}", key_i), "value".to_string())
+                .unwrap();
+        }
+        let mut rng = StdRng::from_rng(thread_rng()).unwrap();
+        b.iter(|| {
+            sled_kvs
+                .get(format!("key{}", rng.gen_range(1, *i)))
+                .unwrap();
+        })
+    });
     c.bench("read_bench", bench);
 }
 
