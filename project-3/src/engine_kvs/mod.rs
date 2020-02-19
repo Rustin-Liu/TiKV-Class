@@ -1,4 +1,4 @@
 //! This module provides various key value storage engine kvs.
-pub use kvs::KvStore;
+pub use my_kvs::My_KvStore;
 
-mod kvs;
+mod my_kvs;

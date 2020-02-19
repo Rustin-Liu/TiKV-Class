@@ -18,17 +18,17 @@ const LOG_FILE_NAME: &str = "kvs.log";
 /// A `BTreeMap` in memory stores the keys and the value locations for fast query.
 ///
 /// ```rust
-/// # use kvs::{KvStore, Result};
+/// # use kvs::{My_KvStore, Result, KvEngine};
 /// # fn try_main() -> Result<()> {
 /// use std::env::current_dir;
-/// let mut store = KvStore::open(current_dir()?)?;
+/// let mut store = My_KvStore::open(current_dir()?)?;
 /// store.set("key".to_owned(), "value".to_owned())?;
 /// let val = store.get("key".to_owned())?;
 /// assert_eq!(val, Some("value".to_owned()));
 /// # Ok(())
 /// # }
 /// ```
-pub struct KvStore {
+pub struct My_KvStore {
     // the current log file director path.
     path: PathBuf,
     // reader of the current log.
@@ -42,7 +42,7 @@ pub struct KvStore {
     need_compacted: u64,
 }
 
-impl KvStore {
+impl My_KvStore {
     /// Opens a `KvStore` with the given path.
     ///
     /// This will create a new directory if the given one does not exist.
@@ -50,7 +50,7 @@ impl KvStore {
     /// # Errors
     ///
     /// It propagates I/O or deserialization errors during the log replay.
-    pub fn open(path: impl Into<PathBuf>) -> Result<KvStore> {
+    pub fn open(path: impl Into<PathBuf>) -> Result<My_KvStore> {
         let path = path.into();
         fs::create_dir_all(&path)?;
         let log_path = path.join(LOG_FILE_NAME);
@@ -62,7 +62,7 @@ impl KvStore {
         let mut need_compacted = 0;
         need_compacted += load(&mut reader, &mut index)?;
 
-        Ok(KvStore {
+        Ok(My_KvStore {
             path,
             reader,
             writer,
@@ -107,7 +107,7 @@ impl KvStore {
     }
 }
 
-impl KvEngine for KvStore {
+impl KvEngine for My_KvStore {
     /// Sets the value of a string key to a string.
     ///
     /// If the key already exists, the previous value will be overwritten.

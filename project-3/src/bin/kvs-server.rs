@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate clap;
 
-use kvs::{KvEngine, KvStore, KvsServer, Result, SledKvs};
+use kvs::{KvEngine, My_KvStore, KvsServer, Result, SledKvs};
 use slog::*;
 use std::env::current_dir;
 use std::net::SocketAddr;
@@ -76,7 +76,7 @@ fn run(opt: Opt) -> Result<()> {
 
     match engine {
         Engine::kvs => start_engine(
-            KvsServer::new(logger, KvStore::open(current_dir_path)?),
+            KvsServer::new(logger, My_KvStore::open(current_dir_path)?),
             opt.addr,
         ),
         Engine::sled => start_engine(
