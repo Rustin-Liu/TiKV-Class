@@ -1,0 +1,32 @@
+name: TiKV-Class
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build and Test project1
+      working-directory: ./project-1
+      run: |
+        cargo build  --verbose
+        cargo test   --verbose
+        cargo clippy --verbose
+
+    - name: Build and Test project2
+      working-directory: ./project-2
+      run: |
+        cargo build  --verbose
+        cargo test   --verbose
+        cargo clippy --verbose
+
+    - name: Build and Test project3
+      working-directory: ./project-3
+      run: |
+        cargo build  --verbose
+        cargo test   --verbose
+        cargo clippy --verbose
+        cargo bench  .
