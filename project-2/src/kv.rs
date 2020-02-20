@@ -244,7 +244,7 @@ struct CommandPos {
     len: u64,
 }
 
-impl From<(Range<u64>)> for CommandPos {
+impl From<Range<u64>> for CommandPos {
     fn from(range: Range<u64>) -> Self {
         CommandPos {
             pos: range.start,
