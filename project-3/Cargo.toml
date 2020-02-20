@@ -23,7 +23,7 @@ predicates = "1.0.0"
 rand = "0.7"
 tempfile = "3.0.7"
 walkdir = "2.2.7"
-criterion = "0.3"
+criterion = "0.2.11"
 
 [[bench]]
 name = "kvs_benchmark"

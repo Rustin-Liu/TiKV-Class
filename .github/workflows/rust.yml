@@ -29,4 +29,5 @@ jobs:
         cargo build  --verbose
         cargo test   --verbose
         cargo clippy --verbose
-        cargo bench  .
+        sudo apt-get install gnuplot
+        cargo bench

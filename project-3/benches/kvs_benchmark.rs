@@ -1,8 +1,11 @@
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion, ParameterizedBenchmark};
+#[macro_use]
+extern crate criterion;
+
+use criterion::{BatchSize, Criterion, ParameterizedBenchmark};
 use kvs::{KvEngine, MyKvStore, SledKvs};
 use rand::prelude::*;
-use std::env::current_dir;
 use std::iter;
+use tempfile::TempDir;
 
 fn write_bench(c: &mut Criterion) {
     let bench = ParameterizedBenchmark::new(
@@ -10,8 +13,8 @@ fn write_bench(c: &mut Criterion) {
         |b, _| {
             b.iter_batched(
                 || {
-                    let current_dir_path = current_dir().unwrap();
-                    MyKvStore::open(current_dir_path).unwrap()
+                    let temp_dir = TempDir::new().unwrap();
+                    MyKvStore::open(temp_dir.path()).unwrap()
                 },
                 |mut my_kvs| {
                     for i in 1..100 {
@@ -28,8 +31,8 @@ fn write_bench(c: &mut Criterion) {
     .with_function("sled", |b, _| {
         b.iter_batched(
             || {
-                let current_dir_path = current_dir().unwrap();
-                SledKvs::new(sled::open(current_dir_path).unwrap())
+                let temp_dir = TempDir::new().unwrap();
+                SledKvs::new(sled::open(temp_dir).unwrap())
             },
             |mut sled_kvs| {
                 for i in 1..100 {
@@ -47,36 +50,34 @@ fn write_bench(c: &mut Criterion) {
 fn read_bench(c: &mut Criterion) {
     let bench = ParameterizedBenchmark::new(
         "kvs",
-        |b, i| {
-            let current_dir_path = current_dir().unwrap();
-            let mut store = MyKvStore::open(current_dir_path).unwrap();
-            for key_i in 1..*i {
+        |b, &i| {
+            let temp_dir = TempDir::new().unwrap();
+            let mut store = MyKvStore::open(temp_dir.path()).unwrap();
+            for key_i in 1..i {
                 store
                     .set(format!("key{}", key_i), "value".to_string())
                     .unwrap();
             }
-            let mut rng = StdRng::from_rng(thread_rng()).unwrap();
+            let mut rng = StdRng::seed_from_u64(64);
             b.iter(|| {
                 store
-                    .get(format!("key{}", rng.gen_range(1, 1 << *i)))
+                    .get(format!("key{}", rng.gen_range(0, 1 << i)))
                     .unwrap();
             })
         },
         vec![1 << 10],
     )
-    .with_function("sled", |b, i| {
-        let current_dir_path = current_dir().unwrap();
-        let mut sled_kvs = SledKvs::new(sled::open(current_dir_path).unwrap());
-        for key_i in 1..*i {
+    .with_function("sled", |b, &i| {
+        let temp_dir = TempDir::new().unwrap();
+        let mut sled_kvs = SledKvs::new(sled::open(temp_dir).unwrap());
+        for key_i in 1..i {
             sled_kvs
                 .set(format!("key{}", key_i), "value".to_string())
                 .unwrap();
         }
-        let mut rng = StdRng::from_rng(thread_rng()).unwrap();
+        let mut rng = StdRng::seed_from_u64(64);
         b.iter(|| {
-            sled_kvs
-                .get(format!("key{}", rng.gen_range(1, *i)))
-                .unwrap();
+            sled_kvs.get(format!("key{}", rng.gen_range(0, i))).unwrap();
         })
     });
     c.bench("read_bench", bench);
