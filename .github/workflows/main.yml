@@ -1,4 +1,4 @@
-name: TiKV-Class
+name: TiKV-Class-Main
 
 on:
   push:
@@ -32,5 +32,3 @@ jobs:
         cargo build  --verbose
         cargo test   --verbose
         cargo clippy --verbose
-        sudo apt-get install gnuplot
-        cargo bench
