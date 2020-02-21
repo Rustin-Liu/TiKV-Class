@@ -1,6 +1,9 @@
 name: TiKV-Class
 
-on: [push]
+on:
+  push:
+    paths-ignore:
+      - '**/criterion_result/**'
 
 jobs:
   build:
