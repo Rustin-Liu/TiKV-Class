@@ -2,8 +2,8 @@ name: TiKV-Class-Bench
 
 on:
   push:
-    paths-ignore:
-      - '**/criterion_result/**'
+    paths:
+      - '**/benches/**'
 
 jobs:
   build:
