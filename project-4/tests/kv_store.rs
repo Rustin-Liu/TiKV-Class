@@ -1,4 +1,4 @@
-use kvs::{KvStore, KvsEngine, Result};
+use kvs::{MyKvStore, KvEngine, Result};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use tempfile::TempDir;
@@ -8,7 +8,7 @@ use walkdir::WalkDir;
 #[test]
 fn get_stored_value() -> Result<()> {
     let temp_dir = TempDir::new().expect("unable to create temporary working directory");
-    let store = KvStore::open(temp_dir.path())?;
+    let store = MyKvStore::open(temp_dir.path())?;
 
     store.set("key1".to_owned(), "value1".to_owned())?;
     store.set("key2".to_owned(), "value2".to_owned())?;
@@ -18,7 +18,7 @@ fn get_stored_value() -> Result<()> {
 
     // Open from disk again and check persistent data
     drop(store);
-    let store = KvStore::open(temp_dir.path())?;
+    let store = MyKvStore::open(temp_dir.path())?;
     assert_eq!(store.get("key1".to_owned())?, Some("value1".to_owned()));
     assert_eq!(store.get("key2".to_owned())?, Some("value2".to_owned()));
 
@@ -29,7 +29,7 @@ fn get_stored_value() -> Result<()> {
 #[test]
 fn overwrite_value() -> Result<()> {
     let temp_dir = TempDir::new().expect("unable to create temporary working directory");
-    let store = KvStore::open(temp_dir.path())?;
+    let store = MyKvStore::open(temp_dir.path())?;
 
     store.set("key1".to_owned(), "value1".to_owned())?;
     assert_eq!(store.get("key1".to_owned())?, Some("value1".to_owned()));
@@ -38,7 +38,7 @@ fn overwrite_value() -> Result<()> {
 
     // Open from disk again and check persistent data
     drop(store);
-    let store = KvStore::open(temp_dir.path())?;
+    let store = MyKvStore::open(temp_dir.path())?;
     assert_eq!(store.get("key1".to_owned())?, Some("value2".to_owned()));
     store.set("key1".to_owned(), "value3".to_owned())?;
     assert_eq!(store.get("key1".to_owned())?, Some("value3".to_owned()));
@@ -50,14 +50,14 @@ fn overwrite_value() -> Result<()> {
 #[test]
 fn get_non_existent_value() -> Result<()> {
     let temp_dir = TempDir::new().expect("unable to create temporary working directory");
-    let store = KvStore::open(temp_dir.path())?;
+    let store = MyKvStore::open(temp_dir.path())?;
 
     store.set("key1".to_owned(), "value1".to_owned())?;
     assert_eq!(store.get("key2".to_owned())?, None);
 
     // Open from disk again and check persistent data
     drop(store);
-    let store = KvStore::open(temp_dir.path())?;
+    let store = MyKvStore::open(temp_dir.path())?;
     assert_eq!(store.get("key2".to_owned())?, None);
 
     Ok(())
@@ -66,7 +66,7 @@ fn get_non_existent_value() -> Result<()> {
 #[test]
 fn remove_non_existent_key() -> Result<()> {
     let temp_dir = TempDir::new().expect("unable to create temporary working directory");
-    let store = KvStore::open(temp_dir.path())?;
+    let store = MyKvStore::open(temp_dir.path())?;
     assert!(store.remove("key1".to_owned()).is_err());
     Ok(())
 }
@@ -74,7 +74,7 @@ fn remove_non_existent_key() -> Result<()> {
 #[test]
 fn remove_key() -> Result<()> {
     let temp_dir = TempDir::new().expect("unable to create temporary working directory");
-    let store = KvStore::open(temp_dir.path())?;
+    let store = MyKvStore::open(temp_dir.path())?;
     store.set("key1".to_owned(), "value1".to_owned())?;
     assert!(store.remove("key1".to_owned()).is_ok());
     assert_eq!(store.get("key1".to_owned())?, None);
@@ -86,7 +86,7 @@ fn remove_key() -> Result<()> {
 #[test]
 fn compaction() -> Result<()> {
     let temp_dir = TempDir::new().expect("unable to create temporary working directory");
-    let store = KvStore::open(temp_dir.path())?;
+    let store = MyKvStore::open(temp_dir.path())?;
 
     let dir_size = || {
         let entries = WalkDir::new(temp_dir.path()).into_iter();
@@ -116,7 +116,7 @@ fn compaction() -> Result<()> {
 
         drop(store);
         // reopen and check content
-        let store = KvStore::open(temp_dir.path())?;
+        let store = MyKvStore::open(temp_dir.path())?;
         for key_id in 0..1000 {
             let key = format!("key{}", key_id);
             assert_eq!(store.get(key)?, Some(format!("{}", iter)));
@@ -130,7 +130,7 @@ fn compaction() -> Result<()> {
 #[test]
 fn concurrent_set() -> Result<()> {
     let temp_dir = TempDir::new().expect("unable to create temporary working directory");
-    let store = KvStore::open(temp_dir.path())?;
+    let store = MyKvStore::open(temp_dir.path())?;
     let barrier = Arc::new(Barrier::new(1001));
     for i in 0..1000 {
         let store = store.clone();
@@ -150,7 +150,7 @@ fn concurrent_set() -> Result<()> {
 
     // Open from disk again and check persistent data
     drop(store);
-    let store = KvStore::open(temp_dir.path())?;
+    let store = MyKvStore::open(temp_dir.path())?;
     for i in 0..1000 {
         assert_eq!(store.get(format!("key{}", i))?, Some(format!("value{}", i)));
     }
@@ -161,7 +161,7 @@ fn concurrent_set() -> Result<()> {
 #[test]
 fn concurrent_get() -> Result<()> {
     let temp_dir = TempDir::new().expect("unable to create temporary working directory");
-    let store = KvStore::open(temp_dir.path())?;
+    let store = MyKvStore::open(temp_dir.path())?;
     for i in 0..100 {
         store
             .set(format!("key{}", i), format!("value{}", i))
@@ -188,7 +188,7 @@ fn concurrent_get() -> Result<()> {
 
     // Open from disk again and check persistent data
     drop(store);
-    let store = KvStore::open(temp_dir.path())?;
+    let store = MyKvStore::open(temp_dir.path())?;
     let mut handles = Vec::new();
     for thread_id in 0..100 {
         let store = store.clone();

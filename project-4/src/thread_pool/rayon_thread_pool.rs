@@ -4,12 +4,12 @@ use crate::{ThreadPool,Result};
 pub struct RayonThreadPool;
 
 impl ThreadPool  for RayonThreadPool{
-    fn new(size: u32) -> Result<Self> where
+    fn new(_size: u32) -> Result<Self> where
         Self: Sized {
         unimplemented!()
     }
 
-    fn spawn<F>(&self, job: F) where F: FnOnce() + Send + 'static {
+    fn spawn<F>(&self, _job: F) where F: FnOnce() + Send + 'static {
         unimplemented!()
     }
 }
