@@ -1,4 +1,4 @@
-use crate::{KvsError, Result, KvEngine};
+use crate::{KvEngine, KvsError, Result};
 use sled::{Db, Tree};
 
 /// Wrapper of `sled::Db`.

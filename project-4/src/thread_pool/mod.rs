@@ -11,11 +11,12 @@ pub use rayon_thread_pool::*;
 use crate::Result;
 
 /// The trait that all thread pools should implement.
-pub trait ThreadPool{
+pub trait ThreadPool {
     /// Create a thread pool.
     ///
     /// Return an error if any thread spawn failed.
-    fn new(size: u32) -> Result<Self> where
+    fn new(size: u32) -> Result<Self>
+    where
         Self: Sized;
 
     /// Spawns a function into the thread pool.
@@ -24,5 +25,7 @@ pub trait ThreadPool{
     /// continues to operate with the same number of threads — the thread
     /// count is not reduced nor is the thread pool destroyed, corrupted or
     /// invalidated.
-    fn spawn<F>(&self, job: F) where F: FnOnce() + Send + 'static;
+    fn spawn<F>(&self, job: F)
+    where
+        F: FnOnce() + Send + 'static;
 }
