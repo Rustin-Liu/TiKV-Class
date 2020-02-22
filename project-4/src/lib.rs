@@ -1,6 +1,10 @@
 #![deny(missing_docs)]
 //! A simple key/value store.
 
+extern crate slog;
+#[macro_use]
+extern crate slog_scope;
+
 pub use client::KvsClient;
 pub use engine_kvs::MyKvStore;
 pub use engine_sled::SledKvs;

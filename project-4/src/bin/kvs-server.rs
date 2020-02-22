@@ -1,8 +1,11 @@
 #[macro_use]
 extern crate clap;
-
+#[macro_use(slog_o)]
+extern crate slog;
+#[macro_use]
+extern crate slog_scope;
 use kvs::{KvEngine, KvsServer, MyKvStore, Result, SledKvs};
-use slog::*;
+use slog::Drain;
 use std::env::current_dir;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -63,24 +66,21 @@ fn run(opt: Opt) -> Result<()> {
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::FullFormat::new(decorator).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
-    let logger = slog::Logger::root(drain, o!());
+    let logger = slog::Logger::root(drain, slog_o!());
     let engine = opt.engine.unwrap_or(Engine::kvs);
-
-    info!(logger, "kvs-server {}", env!("CARGO_PKG_VERSION"));
-    info!(logger, "Storage engine: {}", engine);
-    info!(logger, "Listening on {}", opt.addr);
+    let _guard = slog_scope::set_global_logger(logger);
+    info!("kvs-server {}", env!("CARGO_PKG_VERSION"));
+    info!("Storage engine: {}", engine);
+    info!("Listening on {}", opt.addr);
 
     let current_dir_path = current_dir()?;
 
     write_engine_meta(&current_dir_path, engine)?;
 
     match engine {
-        Engine::kvs => start_engine(
-            KvsServer::new(logger, MyKvStore::open(current_dir_path)?),
-            opt.addr,
-        ),
+        Engine::kvs => start_engine(KvsServer::new(MyKvStore::open(current_dir_path)?), opt.addr),
         Engine::sled => start_engine(
-            KvsServer::new(logger, SledKvs::new(sled::open(current_dir_path)?)),
+            KvsServer::new(SledKvs::new(sled::open(current_dir_path)?)),
             opt.addr,
         ),
     }?;

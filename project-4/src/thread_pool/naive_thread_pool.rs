@@ -1,7 +1,7 @@
-use crate::ThreadPool;
+use std::thread;
 
 use crate::Result;
-use std::thread;
+use crate::ThreadPool;
 
 /// NativeThreadPool is a simple non-shared thread pool.
 pub struct NaiveThreadPool;
