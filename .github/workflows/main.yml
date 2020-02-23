@@ -29,3 +29,8 @@ jobs:
       run: |
         cargo test   --verbose
         cargo clippy --verbose
+    - name: Build and Test project4
+      working-directory: ./project-4
+      run: |
+        cargo test   --verbose
+        cargo clippy --verbose
