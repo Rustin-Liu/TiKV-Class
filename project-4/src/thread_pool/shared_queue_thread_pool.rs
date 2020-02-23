@@ -17,6 +17,7 @@ impl ThreadPool for SharedQueueThreadPool {
     where
         Self: Sized,
     {
+        assert!(size > 0, "size must more than 0");
         let (sender, receiver) = channel::unbounded::<Box<dyn FnOnce() + Send + 'static>>();
         for _ in 0..size {
             let task_receiver = TaskReceiver(receiver.clone());

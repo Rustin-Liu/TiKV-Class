@@ -8,12 +8,15 @@ pub struct RayonThreadPool {
 }
 
 impl ThreadPool for RayonThreadPool {
-    fn new(_size: u32) -> Result<Self>
+    fn new(size: u32) -> Result<Self>
     where
         Self: Sized,
     {
+        assert!(size > 0, "size must more than 0");
         Ok(RayonThreadPool {
-            thread_pool: rayon::ThreadPoolBuilder::new().num_threads(8).build()?,
+            thread_pool: rayon::ThreadPoolBuilder::new()
+                .num_threads(size as usize)
+                .build()?,
         })
     }
 
