@@ -4,7 +4,7 @@ extern crate clap;
 extern crate slog;
 #[macro_use]
 extern crate slog_scope;
-use kvs::{KvEngine, KvsServer, MyKvStore, Result, SledKvs};
+use kvs::{KvEngine, KvsServer, MyKvStore, NaiveThreadPool, Result, SledKvs, ThreadPool};
 use slog::Drain;
 use std::env::current_dir;
 use std::net::SocketAddr;
@@ -78,9 +78,18 @@ fn run(opt: Opt) -> Result<()> {
     write_engine_meta(&current_dir_path, engine)?;
 
     match engine {
-        Engine::kvs => start_engine(KvsServer::new(MyKvStore::open(current_dir_path)?), opt.addr),
+        Engine::kvs => start_engine(
+            KvsServer::new(
+                MyKvStore::open(current_dir_path)?,
+                NaiveThreadPool::new(num_cpus::get() as u32).unwrap(),
+            ),
+            opt.addr,
+        ),
         Engine::sled => start_engine(
-            KvsServer::new(SledKvs::new(sled::open(current_dir_path)?)),
+            KvsServer::new(
+                SledKvs::new(sled::open(current_dir_path)?),
+                NaiveThreadPool::new(num_cpus::get() as u32).unwrap(),
+            ),
             opt.addr,
         ),
     }?;
@@ -88,7 +97,10 @@ fn run(opt: Opt) -> Result<()> {
 }
 
 // Start engine with address.
-fn start_engine<E: KvEngine>(server: KvsServer<E>, addr: SocketAddr) -> Result<()> {
+fn start_engine<E: KvEngine, P: ThreadPool>(
+    server: KvsServer<E, P>,
+    addr: SocketAddr,
+) -> Result<()> {
     server.start(addr)
 }
 

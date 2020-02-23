@@ -17,6 +17,9 @@ slog-async = "2.4.0"
 slog-scope = "4.3.0"
 sled = "0.31.0"
 crossbeam-skiplist = { version = "0.0.0", git = "https://github.com/crossbeam-rs/crossbeam.git", rev = "8cc906b" }
+crossbeam = "0.7"
+num_cpus = "1.0"
+rayon = "1.1"
 
 
 [dev-dependencies]

@@ -4,22 +4,20 @@ use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 
 use crate::request::Request;
 use crate::response::{GetResponse, RemoveResponse, SetResponse};
-use crate::{KvEngine, NaiveThreadPool, Result, ThreadPool};
-
-const DEFAULT_THREAD_COUNT: u32 = 8;
+use crate::{KvEngine, Result, ThreadPool};
 
 /// The server of key value store.
-pub struct KvsServer<E: KvEngine> {
+pub struct KvsServer<E: KvEngine, P: ThreadPool> {
     engine: E,
-    thread_pool: NaiveThreadPool,
+    thread_pool: P,
 }
 
-impl<E: KvEngine> KvsServer<E> {
+impl<E: KvEngine, P: ThreadPool> KvsServer<E, P> {
     /// Create a serve with logger.
-    pub fn new(engine: E) -> Self {
+    pub fn new(engine: E, thread_pool: P) -> Self {
         KvsServer {
             engine,
-            thread_pool: NaiveThreadPool::new(DEFAULT_THREAD_COUNT).unwrap(),
+            thread_pool,
         }
     }
 

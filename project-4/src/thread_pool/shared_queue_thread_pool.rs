@@ -1,20 +1,66 @@
 use crate::{Result, ThreadPool};
+use crossbeam::channel::{self, Receiver, Sender};
+use std::thread;
 
-/// Shared queue thread pool.
-pub struct SharedQueueThreadPool;
+/// A shared queue thread pool.
+///
+/// If a spawn failed because panic, it will start a new thread.
+pub struct SharedQueueThreadPool {
+    sender: Sender<Box<dyn FnOnce() + Send + 'static>>,
+}
 
 impl ThreadPool for SharedQueueThreadPool {
-    fn new(_size: u32) -> Result<Self>
+    /// Create a thread pool.
+    ///
+    /// It use MPMC to add and execute the task.
+    fn new(size: u32) -> Result<Self>
     where
         Self: Sized,
     {
-        unimplemented!()
+        let (sender, receiver) = channel::unbounded::<Box<dyn FnOnce() + Send + 'static>>();
+        for _ in 0..size {
+            let task_receiver = TaskReceiver(receiver.clone());
+            thread::Builder::new().spawn(move || run_tasks(task_receiver))?;
+        }
+        Ok(SharedQueueThreadPool { sender })
     }
 
-    fn spawn<F>(&self, _job: F)
+    /// Spawns a function into the thread pool.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the thread pool has no thread.
+    fn spawn<F>(&self, job: F)
     where
         F: FnOnce() + Send + 'static,
     {
-        unimplemented!()
+        self.sender
+            .send(Box::new(job))
+            .expect("The thread pool is full.");
+    }
+}
+
+#[derive(Clone)]
+struct TaskReceiver(Receiver<Box<dyn FnOnce() + Send + 'static>>);
+
+impl Drop for TaskReceiver {
+    fn drop(&mut self) {
+        if thread::panicking() {
+            let task_receiver = self.clone();
+            if let Err(e) = thread::Builder::new().spawn(move || run_tasks(task_receiver)) {
+                error!("Failed to spawn a new thread: {}", e);
+            }
+        }
+    }
+}
+
+fn run_tasks(receiver: TaskReceiver) {
+    loop {
+        match receiver.0.recv() {
+            Ok(task) => {
+                task();
+            }
+            Err(_) => debug!("Thread exits because the thread pool is destroyed."),
+        }
     }
 }

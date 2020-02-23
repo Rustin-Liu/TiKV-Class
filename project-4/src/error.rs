@@ -26,6 +26,9 @@ pub enum KvsError {
     /// Key or value is invalid UTF-8 sequence.
     #[fail(display = "UTF-8 error: {}", _0)]
     Utf8(#[cause] FromUtf8Error),
+    /// Rayon error.
+    #[fail(display = "rayon error: {}", _0)]
+    ThreadPoolBuildError(#[cause] rayon::ThreadPoolBuildError),
 }
 
 impl From<io::Error> for KvsError {
@@ -49,6 +52,12 @@ impl From<FromUtf8Error> for KvsError {
 impl From<sled::Error> for KvsError {
     fn from(err: sled::Error) -> KvsError {
         KvsError::Sled(err)
+    }
+}
+
+impl From<rayon::ThreadPoolBuildError> for KvsError {
+    fn from(err: rayon::ThreadPoolBuildError) -> KvsError {
+        KvsError::ThreadPoolBuildError(err)
     }
 }
 
