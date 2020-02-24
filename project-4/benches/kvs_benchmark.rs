@@ -1,87 +1,48 @@
 #[macro_use]
 extern crate criterion;
 
+use assert_cmd::prelude::*;
 use criterion::{BatchSize, Criterion, ParameterizedBenchmark};
-use kvs::{KvEngine, MyKvStore, SledKvs};
-use rand::prelude::*;
-use std::iter;
-use tempfile::TempDir;
+use kvs::{KvEngine, KvsClient, KvsServer, MyKvStore, SharedQueueThreadPool, ThreadPool};
+use std::net::SocketAddr;
+use std::process::Command;
+use std::str::FromStr;
+use std::sync::mpsc;
+use std::time::Duration;
+use std::{iter, thread};
+use tempfile::{tempdir, TempDir};
 
-fn write_bench(c: &mut Criterion) {
-    let bench = ParameterizedBenchmark::new(
-        "kvs",
-        |b, _| {
-            b.iter_batched(
-                || {
-                    let temp_dir = TempDir::new().unwrap();
-                    MyKvStore::open(temp_dir.path()).unwrap()
-                },
-                |mut my_kvs| {
-                    for i in 1..100 {
-                        my_kvs
-                            .set(format!("key{}", i), "value".to_string())
-                            .unwrap();
-                    }
-                },
-                BatchSize::SmallInput,
-            )
-        },
-        iter::once(()),
-    )
-    .with_function("sled", |b, _| {
-        b.iter_batched(
-            || {
-                let temp_dir = TempDir::new().unwrap();
-                SledKvs::new(sled::open(temp_dir).unwrap())
-            },
-            |mut sled_kvs| {
-                for i in 1..100 {
-                    sled_kvs
+const DEFAULT_LISTENING_ADDRESS: &str = "127.0.0.1:4000";
+
+fn shared_queue_kvs_write_bench(c: &mut Criterion) {
+    let thread_nums = vec![1];
+    c.bench_function_over_inputs(
+        "shared_queue_kvs",
+        |b, &num| {
+            thread::spawn(move || {
+                let address = SocketAddr::from_str(DEFAULT_LISTENING_ADDRESS).unwrap();
+                let temp_dir = tempdir().unwrap();
+                let server = KvsServer::new(
+                    MyKvStore::open(temp_dir.path()).unwrap(),
+                    SharedQueueThreadPool::new(num).unwrap(),
+                );
+                server.start(address);
+            });
+            b.iter(|| {
+                thread::sleep(Duration::from_secs(3));
+                let mut client =
+                    KvsClient::init(SocketAddr::from_str(DEFAULT_LISTENING_ADDRESS).unwrap())
+                        .unwrap();
+                for i in 1..10 {
+                    client
                         .set(format!("key{}", i), "value".to_string())
                         .unwrap();
                 }
-            },
-            BatchSize::SmallInput,
-        )
-    });
-    c.bench("write_bench", bench);
-}
-
-fn read_bench(c: &mut Criterion) {
-    let bench = ParameterizedBenchmark::new(
-        "kvs",
-        |b, &i| {
-            let temp_dir = TempDir::new().unwrap();
-            let mut store = MyKvStore::open(temp_dir.path()).unwrap();
-            for key_i in 1..i {
-                store
-                    .set(format!("key{}", key_i), "value".to_string())
-                    .unwrap();
-            }
-            let mut rng = StdRng::seed_from_u64(64);
-            b.iter(|| {
-                store
-                    .get(format!("key{}", rng.gen_range(0, 1 << i)))
-                    .unwrap();
-            })
+            });
         },
-        vec![1 << 10],
-    )
-    .with_function("sled", |b, &i| {
-        let temp_dir = TempDir::new().unwrap();
-        let mut sled_kvs = SledKvs::new(sled::open(temp_dir).unwrap());
-        for key_i in 1..i {
-            sled_kvs
-                .set(format!("key{}", key_i), "value".to_string())
-                .unwrap();
-        }
-        let mut rng = StdRng::seed_from_u64(64);
-        b.iter(|| {
-            sled_kvs.get(format!("key{}", rng.gen_range(0, i))).unwrap();
-        })
-    });
-    c.bench("read_bench", bench);
+        thread_nums,
+    );
 }
 
-criterion_group!(benches, write_bench, read_bench);
+criterion_group!(benches, shared_queue_kvs_write_bench);
 criterion_main!(benches);
