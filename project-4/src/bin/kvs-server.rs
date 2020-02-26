@@ -4,7 +4,10 @@ extern crate clap;
 extern crate slog;
 #[macro_use]
 extern crate slog_scope;
-use kvs::{KvEngine, KvsServer, MyKvStore, NaiveThreadPool, Result, SledKvs, ThreadPool};
+use kvs::{
+    KvEngine, KvsServer, MyKvStore, RayonThreadPool, Result, SharedQueueThreadPool, SledKvs,
+    ThreadPool,
+};
 use slog::Drain;
 use std::env::current_dir;
 use std::net::SocketAddr;
@@ -14,6 +17,7 @@ use std::{env, fs};
 use structopt::StructOpt;
 
 const DEFAULT_LISTENING_ADDRESS: &str = "127.0.0.1:4000";
+const DEFAULT_THREAD_POOL_SIZE: &str = "8";
 
 arg_enum! {
     #[allow(non_camel_case_types)]
@@ -21,6 +25,15 @@ arg_enum! {
     enum Engine {
         kvs,
         sled
+    }
+}
+
+arg_enum! {
+    #[allow(non_camel_case_types)]
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    enum Pool {
+        shared,
+        rayon,
     }
 }
 
@@ -42,6 +55,20 @@ struct Opt {
         raw(possible_values = "&Engine::variants()")
     )]
     engine: Option<Engine>,
+    #[structopt(
+        long,
+        help = "Start with which thread pool.",
+        value_name = "THREAD-POOL-NAME",
+        raw(possible_values = "&Pool::variants()")
+    )]
+    thread_pool: Option<Pool>,
+    #[structopt(
+        long,
+        help = "The thread pool size",
+        value_name = "SIZE",
+        raw(default_value = "DEFAULT_THREAD_POOL_SIZE")
+    )]
+    thread_pool_size: String,
 }
 
 fn main() {
@@ -67,32 +94,49 @@ fn run(opt: Opt) -> Result<()> {
     let drain = slog_term::FullFormat::new(decorator).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
     let logger = slog::Logger::root(drain, slog_o!());
-    let engine = opt.engine.unwrap_or(Engine::kvs);
     let _guard = slog_scope::set_global_logger(logger);
+
+    let engine = opt.engine.unwrap_or(Engine::kvs);
+    let thread_pool = opt.thread_pool.unwrap_or(Pool::shared);
+    let thread_pool_size: u32 = opt.thread_pool_size.parse().unwrap();
     info!("kvs-server {}", env!("CARGO_PKG_VERSION"));
     info!("Storage engine: {}", engine);
     info!("Listening on {}", opt.addr);
 
     let current_dir_path = current_dir()?;
-
     write_engine_meta(&current_dir_path, engine)?;
 
-    match engine {
-        Engine::kvs => start_engine(
+    match (engine, thread_pool) {
+        (Engine::kvs, Pool::shared) => start_engine(
             KvsServer::new(
                 MyKvStore::open(current_dir_path)?,
-                NaiveThreadPool::new(num_cpus::get() as u32).unwrap(),
+                SharedQueueThreadPool::new(thread_pool_size)?,
             ),
             opt.addr,
-        ),
-        Engine::sled => start_engine(
+        )?,
+        (Engine::kvs, Pool::rayon) => start_engine(
+            KvsServer::new(
+                MyKvStore::open(current_dir_path)?,
+                RayonThreadPool::new(thread_pool_size)?,
+            ),
+            opt.addr,
+        )?,
+        (Engine::sled, Pool::shared) => start_engine(
             KvsServer::new(
                 SledKvs::new(sled::open(current_dir_path)?),
-                NaiveThreadPool::new(num_cpus::get() as u32).unwrap(),
+                SharedQueueThreadPool::new(thread_pool_size)?,
             ),
             opt.addr,
-        ),
-    }?;
+        )?,
+        (Engine::sled, Pool::rayon) => start_engine(
+            KvsServer::new(
+                SledKvs::new(sled::open(current_dir_path)?),
+                RayonThreadPool::new(thread_pool_size)?,
+            ),
+            opt.addr,
+        )?,
+    };
+
     Ok(())
 }
 
