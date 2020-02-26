@@ -24,7 +24,6 @@ impl<E: KvEngine, P: ThreadPool> KvsServer<E, P> {
     /// Init the listener.
     pub fn start<A: ToSocketAddrs>(&self, addr: A) -> Result<()> {
         let listener = TcpListener::bind(addr)?;
-        info!("Server started...");
         for stream in listener.incoming() {
             let engine = self.engine.clone();
             self.thread_pool.spawn(move || match stream {
@@ -51,7 +50,6 @@ pub fn handle<E: KvEngine>(engine: E, tcp: TcpStream) -> Result<()> {
     for request_item in request_reader {
         match request_item? {
             Request::Get { key } => {
-                info!("Get get {} command form client {}", key, peer_addr);
                 let response = match engine.get(key) {
                     Ok(value) => GetResponse::Ok(value),
                     Err(e) => GetResponse::Err(format!("{}", e)),
@@ -60,10 +58,6 @@ pub fn handle<E: KvEngine>(engine: E, tcp: TcpStream) -> Result<()> {
                 writer.flush()?;
             }
             Request::Set { key, value } => {
-                info!(
-                    "Get set {}:{} command form client {}",
-                    key, value, peer_addr
-                );
                 let response = match engine.set(key, value) {
                     Ok(_) => SetResponse::Ok(()),
                     Err(e) => SetResponse::Err(format!("{}", e)),
@@ -72,7 +66,6 @@ pub fn handle<E: KvEngine>(engine: E, tcp: TcpStream) -> Result<()> {
                 writer.flush()?;
             }
             Request::Remove { key } => {
-                info!("Get remove key {} command form client {}", key, peer_addr);
                 let response = match engine.remove(key) {
                     Ok(_) => RemoveResponse::Ok(()),
                     Err(e) => RemoveResponse::Err(format!("{}", e)),
