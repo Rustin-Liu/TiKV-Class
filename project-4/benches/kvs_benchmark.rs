@@ -43,7 +43,7 @@ fn shared_queue_kvs_write_bench(c: &mut Criterion) {
                 let _ = receiver.recv(); // wait for main thread to finish
                 child.kill().expect("server exited before killed");
             });
-            thread::sleep(Duration::from_secs(1));
+            thread::sleep(Duration::from_secs(3));
             b.iter(|| {
                 let mut client =
                     KvsClient::init(SocketAddr::from_str(DEFAULT_LISTENING_ADDRESS).unwrap())
@@ -87,7 +87,7 @@ fn shared_queue_kvs_read_bench(c: &mut Criterion) {
                 let _ = receiver.recv(); // wait for main thread to finish
                 child.kill().expect("server exited before killed");
             });
-            thread::sleep(Duration::from_secs(1));
+            thread::sleep(Duration::from_secs(3));
             let address = SocketAddr::from_str(DEFAULT_LISTENING_ADDRESS).unwrap();
             let mut client = KvsClient::init(address).unwrap();
             for i in 1..(1 << 10) {
