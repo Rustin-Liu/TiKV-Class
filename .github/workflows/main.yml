@@ -2,6 +2,13 @@ name: TiKV-Class-Main
 
 on:
   push:
+    branches:
+      - master
+    paths-ignore:
+      - '**/criterion_result/**'
+  pull_request:
+    branches:
+      - master
     paths-ignore:
       - '**/criterion_result/**'
 

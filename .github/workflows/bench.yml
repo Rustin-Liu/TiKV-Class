@@ -2,6 +2,13 @@ name: TiKV-Class-Bench
 
 on:
   push:
+    branches:
+      - master
+    paths:
+      - '**/benches/**'
+  pull_request:
+    branches:
+      - master
     paths:
       - '**/benches/**'
 
