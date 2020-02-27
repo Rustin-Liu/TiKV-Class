@@ -157,7 +157,7 @@ fn rayon_kvs_write_bench(c: &mut Criterion) {
 fn rayon_kvs_read_bench(c: &mut Criterion) {
     let thread_nums = vec![4, 8];
     c.bench_function_over_inputs(
-        "rayon_queue_kvs_read",
+        "rayon_kvs_read",
         |b, &num| {
             let temp_dir = tempdir().unwrap();
             let mut server = Command::cargo_bin("kvs-server").unwrap();
