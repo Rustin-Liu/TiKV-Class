@@ -98,9 +98,9 @@ fn shared_queue_kvs_read_bench(c: &mut Criterion) {
             let mut rng = StdRng::seed_from_u64(64);
             b.iter(|| {
                 let mut client = KvsClient::init(address).unwrap();
-                for i in 1..(1 << 10) {
-                    client.get(format!("key{}", rng.gen_range(0, i))).unwrap();
-                }
+                client
+                    .get(format!("key{}", rng.gen_range(0, 1 << 10)))
+                    .unwrap();
             });
             sender.send(()).unwrap();
             handle.join().unwrap();
