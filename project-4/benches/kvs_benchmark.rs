@@ -20,7 +20,7 @@ const SHARED_POOL: &str = "shared";
 fn shared_queue_kvs_write_bench(c: &mut Criterion) {
     let thread_nums = vec![4, 8];
     c.bench_function_over_inputs(
-        "shared_queue_kvs",
+        "shared_queue_kvs_write",
         |b, &num| {
             let temp_dir = tempdir().unwrap();
             let mut server = Command::cargo_bin("kvs-server").unwrap();
@@ -64,7 +64,7 @@ fn shared_queue_kvs_write_bench(c: &mut Criterion) {
 fn shared_queue_kvs_read_bench(c: &mut Criterion) {
     let thread_nums = vec![4, 8];
     c.bench_function_over_inputs(
-        "shared_queue_kvs",
+        "shared_queue_kvs_read",
         |b, &num| {
             let temp_dir = tempdir().unwrap();
             let mut server = Command::cargo_bin("kvs-server").unwrap();
