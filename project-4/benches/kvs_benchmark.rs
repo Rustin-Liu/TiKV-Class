@@ -15,12 +15,12 @@ use tempfile::tempdir;
 
 const DEFAULT_LISTENING_ADDRESS: &str = "127.0.0.1:4000";
 const KVS: &str = "kvs";
-const SLED: &str = "sled";
+const _SLED: &str = "sled";
 const SHARED_POOL: &str = "shared";
 const RAYON_POOL: &str = "rayon";
 
 fn shared_queue_kvs_write_bench(c: &mut Criterion) {
-    let thread_nums = vec![4, 8];
+    let thread_nums = vec![2, 4, 8];
     c.bench_function_over_inputs(
         "shared_queue_kvs_write",
         |b, &num| {
@@ -64,7 +64,7 @@ fn shared_queue_kvs_write_bench(c: &mut Criterion) {
 }
 
 fn shared_queue_kvs_read_bench(c: &mut Criterion) {
-    let thread_nums = vec![4, 8];
+    let thread_nums = vec![2, 4, 8];
     c.bench_function_over_inputs(
         "shared_queue_kvs_read",
         |b, &num| {
@@ -100,9 +100,7 @@ fn shared_queue_kvs_read_bench(c: &mut Criterion) {
             let mut rng = StdRng::seed_from_u64(64);
             b.iter(|| {
                 let mut client = KvsClient::init(address).unwrap();
-                client
-                    .get(format!("key{}", rng.gen_range(0, 100)))
-                    .unwrap();
+                client.get(format!("key{}", rng.gen_range(0, 100))).unwrap();
             });
             sender.send(()).unwrap();
             handle.join().unwrap();
@@ -112,7 +110,7 @@ fn shared_queue_kvs_read_bench(c: &mut Criterion) {
 }
 
 fn rayon_kvs_write_bench(c: &mut Criterion) {
-    let thread_nums = vec![4, 8];
+    let thread_nums = vec![2, 4, 8];
     c.bench_function_over_inputs(
         "rayon_kvs_write",
         |b, &num| {
@@ -156,7 +154,7 @@ fn rayon_kvs_write_bench(c: &mut Criterion) {
 }
 
 fn rayon_kvs_read_bench(c: &mut Criterion) {
-    let thread_nums = vec![4, 8];
+    let thread_nums = vec![2, 4, 8];
     c.bench_function_over_inputs(
         "rayon_kvs_read",
         |b, &num| {
@@ -192,9 +190,7 @@ fn rayon_kvs_read_bench(c: &mut Criterion) {
             let mut rng = StdRng::seed_from_u64(64);
             b.iter(|| {
                 let mut client = KvsClient::init(address).unwrap();
-                client
-                    .get(format!("key{}", rng.gen_range(0, 100)))
-                    .unwrap();
+                client.get(format!("key{}", rng.gen_range(0, 100))).unwrap();
             });
             sender.send(()).unwrap();
             handle.join().unwrap();
@@ -203,8 +199,8 @@ fn rayon_kvs_read_bench(c: &mut Criterion) {
     );
 }
 
-fn rayon_sled_write_bench(c: &mut Criterion) {
-    let thread_nums = vec![4, 8];
+fn _rayon_sled_write_bench(c: &mut Criterion) {
+    let thread_nums = vec![2, 4, 8];
     c.bench_function_over_inputs(
         "rayon_sled_write",
         |b, &num| {
@@ -213,7 +209,7 @@ fn rayon_sled_write_bench(c: &mut Criterion) {
             let mut child = server
                 .args(&[
                     "--engine",
-                    SLED,
+                    _SLED,
                     "--addr",
                     DEFAULT_LISTENING_ADDRESS,
                     "--thread_pool",
@@ -247,8 +243,8 @@ fn rayon_sled_write_bench(c: &mut Criterion) {
     );
 }
 
-fn rayon_sled_read_bench(c: &mut Criterion) {
-    let thread_nums = vec![4, 8];
+fn _rayon_sled_read_bench(c: &mut Criterion) {
+    let thread_nums = vec![2, 4, 8];
     c.bench_function_over_inputs(
         "rayon_sled_read",
         |b, &num| {
@@ -257,7 +253,7 @@ fn rayon_sled_read_bench(c: &mut Criterion) {
             let mut child = server
                 .args(&[
                     "--engine",
-                    SLED,
+                    _SLED,
                     "--addr",
                     DEFAULT_LISTENING_ADDRESS,
                     "--thread_pool",
@@ -284,9 +280,7 @@ fn rayon_sled_read_bench(c: &mut Criterion) {
             let mut rng = StdRng::seed_from_u64(64);
             b.iter(|| {
                 let mut client = KvsClient::init(address).unwrap();
-                client
-                    .get(format!("key{}", rng.gen_range(0, 100)))
-                    .unwrap();
+                client.get(format!("key{}", rng.gen_range(0, 100))).unwrap();
             });
             sender.send(()).unwrap();
             handle.join().unwrap();
@@ -301,7 +295,9 @@ criterion_group!(
     shared_queue_kvs_read_bench,
     rayon_kvs_write_bench,
     rayon_kvs_read_bench,
-    rayon_sled_write_bench,
-    rayon_sled_read_bench,
+    // Because the sled write is too slow, I cannot run it.
+    // @TODO need use more stable and powerful equipment test it after back to ShenZhen.
+    // rayon_sled_write_bench,
+    // rayon_sled_read_bench,
 );
 criterion_main!(benches);
