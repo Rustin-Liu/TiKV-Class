@@ -28,7 +28,7 @@ jobs:
           git add -A
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git commit -m "ci: automated build push project4 criterion result" -a | exit 0
+          git commit -m "ci: automated build push project3 criterion result" -a | exit 0
       - name: Push criterion changes
         if: github.ref == 'refs/heads/master'
         uses: ad-m/github-push-action@master

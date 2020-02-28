@@ -19,6 +19,7 @@ jobs:
       - name: Build and Bench Test project4
         working-directory: ./project-4
         run: |
+          sudo apt-get install gnuplot
           cargo bench  --verbose
           rm -rf ./criterion_result
           cp -r  ./target/criterion/ ./criterion_result
