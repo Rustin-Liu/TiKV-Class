@@ -1,4 +1,4 @@
-name: TiKV-Class-Project3-Bench
+name: TiKV-Class-Project-Bench
 
 on:
   push:
@@ -11,7 +11,7 @@ on:
 jobs:
   build:
 
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - uses: actions/checkout@v2
@@ -22,13 +22,19 @@ jobs:
           cargo bench  --verbose
           rm -rf ./criterion_result
           cp -r  ./target/criterion/ ./criterion_result
+      - name: Build and Bench Test project4
+        working-directory: ./project-4
+        run: |
+          cargo bench  --verbose
+          rm -rf ./criterion_result
+          cp -r  ./target/criterion/ ./criterion_result
       - name: Commit criterion result
         run: |
           echo ${{ github.ref }}
           git add -A
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git commit -m "ci: automated build push project4 criterion result" -a | exit 0
+          git commit -m "ci: automated build push project criterion result" -a | exit 0
       - name: Push criterion changes
         if: github.ref == 'refs/heads/master'
         uses: ad-m/github-push-action@master
