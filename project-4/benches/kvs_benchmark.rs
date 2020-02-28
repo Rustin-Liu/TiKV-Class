@@ -50,7 +50,7 @@ fn shared_queue_kvs_write_bench(c: &mut Criterion) {
                 let mut client =
                     KvsClient::init(SocketAddr::from_str(DEFAULT_LISTENING_ADDRESS).unwrap())
                         .unwrap();
-                for i in 1..(1 << 10) {
+                for i in 1..100 {
                     client
                         .set(format!("key{}", i), "value".to_string())
                         .unwrap();
@@ -92,7 +92,7 @@ fn shared_queue_kvs_read_bench(c: &mut Criterion) {
             thread::sleep(Duration::from_secs(3));
             let address = SocketAddr::from_str(DEFAULT_LISTENING_ADDRESS).unwrap();
             let mut client = KvsClient::init(address).unwrap();
-            for i in 1..(1 << 10) {
+            for i in 1..100 {
                 client
                     .set(format!("key{}", i), "value".to_string())
                     .unwrap();
@@ -101,7 +101,7 @@ fn shared_queue_kvs_read_bench(c: &mut Criterion) {
             b.iter(|| {
                 let mut client = KvsClient::init(address).unwrap();
                 client
-                    .get(format!("key{}", rng.gen_range(0, 1 << 10)))
+                    .get(format!("key{}", rng.gen_range(0, 100)))
                     .unwrap();
             });
             sender.send(()).unwrap();
@@ -142,7 +142,7 @@ fn rayon_kvs_write_bench(c: &mut Criterion) {
                 let mut client =
                     KvsClient::init(SocketAddr::from_str(DEFAULT_LISTENING_ADDRESS).unwrap())
                         .unwrap();
-                for i in 1..(1 << 10) {
+                for i in 1..100 {
                     client
                         .set(format!("key{}", i), "value".to_string())
                         .unwrap();
@@ -184,7 +184,7 @@ fn rayon_kvs_read_bench(c: &mut Criterion) {
             thread::sleep(Duration::from_secs(3));
             let address = SocketAddr::from_str(DEFAULT_LISTENING_ADDRESS).unwrap();
             let mut client = KvsClient::init(address).unwrap();
-            for i in 1..(1 << 10) {
+            for i in 1..100 {
                 client
                     .set(format!("key{}", i), "value".to_string())
                     .unwrap();
@@ -193,7 +193,7 @@ fn rayon_kvs_read_bench(c: &mut Criterion) {
             b.iter(|| {
                 let mut client = KvsClient::init(address).unwrap();
                 client
-                    .get(format!("key{}", rng.gen_range(0, 1 << 10)))
+                    .get(format!("key{}", rng.gen_range(0, 100)))
                     .unwrap();
             });
             sender.send(()).unwrap();
@@ -234,7 +234,7 @@ fn rayon_sled_write_bench(c: &mut Criterion) {
                 let mut client =
                     KvsClient::init(SocketAddr::from_str(DEFAULT_LISTENING_ADDRESS).unwrap())
                         .unwrap();
-                for i in 1..(1 << 10) {
+                for i in 1..100 {
                     client
                         .set(format!("key{}", i), "value".to_string())
                         .unwrap();
@@ -276,7 +276,7 @@ fn rayon_sled_read_bench(c: &mut Criterion) {
             thread::sleep(Duration::from_secs(3));
             let address = SocketAddr::from_str(DEFAULT_LISTENING_ADDRESS).unwrap();
             let mut client = KvsClient::init(address).unwrap();
-            for i in 1..(1 << 10) {
+            for i in 1..100 {
                 client
                     .set(format!("key{}", i), "value".to_string())
                     .unwrap();
@@ -285,7 +285,7 @@ fn rayon_sled_read_bench(c: &mut Criterion) {
             b.iter(|| {
                 let mut client = KvsClient::init(address).unwrap();
                 client
-                    .get(format!("key{}", rng.gen_range(0, 1 << 10)))
+                    .get(format!("key{}", rng.gen_range(0, 100)))
                     .unwrap();
             });
             sender.send(()).unwrap();
