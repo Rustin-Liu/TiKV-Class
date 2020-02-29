@@ -15,9 +15,9 @@ use tempfile::tempdir;
 
 const DEFAULT_LISTENING_ADDRESS: &str = "127.0.0.1:4000";
 const KVS: &str = "kvs";
-const _SLED: &str = "sled";
+const SLED: &str = "sled";
 const SHARED_POOL: &str = "shared";
-const _RAYON_POOL: &str = "rayon";
+const RAYON_POOL: &str = "rayon";
 
 fn shared_queue_kvs_write_bench(c: &mut Criterion) {
     let thread_nums = vec![2, 4, 8];
@@ -109,7 +109,7 @@ fn shared_queue_kvs_read_bench(c: &mut Criterion) {
     );
 }
 
-fn _rayon_kvs_write_bench(c: &mut Criterion) {
+fn rayon_kvs_write_bench(c: &mut Criterion) {
     let thread_nums = vec![2, 4, 8];
     c.bench_function_over_inputs(
         "rayon_kvs_write",
@@ -123,7 +123,7 @@ fn _rayon_kvs_write_bench(c: &mut Criterion) {
                     "--addr",
                     DEFAULT_LISTENING_ADDRESS,
                     "--thread_pool",
-                    _RAYON_POOL,
+                    RAYON_POOL,
                     "--thread_pool_size",
                     &num.to_string(),
                 ])
@@ -153,7 +153,7 @@ fn _rayon_kvs_write_bench(c: &mut Criterion) {
     );
 }
 
-fn _rayon_kvs_read_bench(c: &mut Criterion) {
+fn rayon_kvs_read_bench(c: &mut Criterion) {
     let thread_nums = vec![2, 4, 8];
     c.bench_function_over_inputs(
         "rayon_kvs_read",
@@ -167,7 +167,7 @@ fn _rayon_kvs_read_bench(c: &mut Criterion) {
                     "--addr",
                     DEFAULT_LISTENING_ADDRESS,
                     "--thread_pool",
-                    _RAYON_POOL,
+                    RAYON_POOL,
                     "--thread_pool_size",
                     &num.to_string(),
                 ])
@@ -199,7 +199,7 @@ fn _rayon_kvs_read_bench(c: &mut Criterion) {
     );
 }
 
-fn _rayon_sled_write_bench(c: &mut Criterion) {
+fn rayon_sled_write_bench(c: &mut Criterion) {
     let thread_nums = vec![2, 4, 8];
     c.bench_function_over_inputs(
         "rayon_sled_write",
@@ -209,11 +209,11 @@ fn _rayon_sled_write_bench(c: &mut Criterion) {
             let mut child = server
                 .args(&[
                     "--engine",
-                    _SLED,
+                    SLED,
                     "--addr",
                     DEFAULT_LISTENING_ADDRESS,
                     "--thread_pool",
-                    _RAYON_POOL,
+                    RAYON_POOL,
                     "--thread_pool_size",
                     &num.to_string(),
                 ])
@@ -243,7 +243,7 @@ fn _rayon_sled_write_bench(c: &mut Criterion) {
     );
 }
 
-fn _rayon_sled_read_bench(c: &mut Criterion) {
+fn rayon_sled_read_bench(c: &mut Criterion) {
     let thread_nums = vec![2, 4, 8];
     c.bench_function_over_inputs(
         "rayon_sled_read",
@@ -253,11 +253,11 @@ fn _rayon_sled_read_bench(c: &mut Criterion) {
             let mut child = server
                 .args(&[
                     "--engine",
-                    _SLED,
+                    SLED,
                     "--addr",
                     DEFAULT_LISTENING_ADDRESS,
                     "--thread_pool",
-                    _RAYON_POOL,
+                    RAYON_POOL,
                     "--thread_pool_size",
                     &num.to_string(),
                 ])
@@ -289,14 +289,14 @@ fn _rayon_sled_read_bench(c: &mut Criterion) {
     );
 }
 
+// @TODO need use more stable and powerful equipment test it after back to ShenZhen.
 criterion_group!(
     benches,
     shared_queue_kvs_write_bench,
     shared_queue_kvs_read_bench,
-    // @TODO need use more stable and powerful equipment test it after back to ShenZhen.
-    // rayon_kvs_write_bench,
-    // rayon_kvs_read_bench,
-    // rayon_sled_write_bench,
-    // rayon_sled_read_bench,
+    rayon_kvs_write_bench,
+    rayon_kvs_read_bench,
+    rayon_sled_write_bench,
+    rayon_sled_read_bench,
 );
 criterion_main!(benches);
