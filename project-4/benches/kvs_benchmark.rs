@@ -20,7 +20,7 @@ const SHARED_POOL: &str = "shared";
 const _RAYON_POOL: &str = "rayon";
 
 fn shared_queue_kvs_write_bench(c: &mut Criterion) {
-    let thread_nums = vec![1, 2, 4, 8];
+    let thread_nums = vec![2, 4, 8];
     c.bench_function_over_inputs(
         "shared_queue_kvs_write",
         |b, &num| {
@@ -64,7 +64,7 @@ fn shared_queue_kvs_write_bench(c: &mut Criterion) {
 }
 
 fn shared_queue_kvs_read_bench(c: &mut Criterion) {
-    let thread_nums = vec![1, 2, 4, 8];
+    let thread_nums = vec![2, 4, 8];
     c.bench_function_over_inputs(
         "shared_queue_kvs_read",
         |b, &num| {
@@ -110,7 +110,7 @@ fn shared_queue_kvs_read_bench(c: &mut Criterion) {
 }
 
 fn _rayon_kvs_write_bench(c: &mut Criterion) {
-    let thread_nums = vec![1, 2, 4, 8];
+    let thread_nums = vec![2, 4, 8];
     c.bench_function_over_inputs(
         "rayon_kvs_write",
         |b, &num| {
@@ -154,7 +154,7 @@ fn _rayon_kvs_write_bench(c: &mut Criterion) {
 }
 
 fn _rayon_kvs_read_bench(c: &mut Criterion) {
-    let thread_nums = vec![1, 2, 4, 8];
+    let thread_nums = vec![2, 4, 8];
     c.bench_function_over_inputs(
         "rayon_kvs_read",
         |b, &num| {
@@ -200,7 +200,7 @@ fn _rayon_kvs_read_bench(c: &mut Criterion) {
 }
 
 fn _rayon_sled_write_bench(c: &mut Criterion) {
-    let thread_nums = vec![1, 2, 4, 8];
+    let thread_nums = vec![2, 4, 8];
     c.bench_function_over_inputs(
         "rayon_sled_write",
         |b, &num| {
@@ -244,7 +244,7 @@ fn _rayon_sled_write_bench(c: &mut Criterion) {
 }
 
 fn _rayon_sled_read_bench(c: &mut Criterion) {
-    let thread_nums = vec![1, 2, 4, 8];
+    let thread_nums = vec![2, 4, 8];
     c.bench_function_over_inputs(
         "rayon_sled_read",
         |b, &num| {
