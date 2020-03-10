@@ -13,7 +13,7 @@ use std::thread;
 use std::time::Duration;
 use tempfile::tempdir;
 
-const DEFAULT_LISTENING_ADDRESS: &str = "127.0.0.1:4000";
+const DEFAULT_LISTENING_ADDRESS: &str = "127.0.0.1:8080";
 const KVS: &str = "kvs";
 const SLED: &str = "sled";
 const SHARED_POOL: &str = "shared";
@@ -289,7 +289,6 @@ fn rayon_sled_read_bench(c: &mut Criterion) {
     );
 }
 
-// @TODO need use more stable and powerful equipment test it after back to ShenZhen.
 criterion_group!(
     benches,
     shared_queue_kvs_write_bench,
