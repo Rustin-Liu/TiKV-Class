@@ -4,11 +4,7 @@ on:
   push:
     branches:
       - master
-    paths-ignore:
-      - 'project-dss/**'
   pull_request:
-    branches:
-      - master
     paths-ignore:
       - 'project-dss/**'
 
