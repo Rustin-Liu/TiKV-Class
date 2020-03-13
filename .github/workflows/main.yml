@@ -2,15 +2,15 @@ name: TiKV-Class-Main
 
 on:
   push:
-    paths-ignore:
-      - 'project-dss/**'
     branches:
       - master
+    paths-ignore:
+      - 'project-dss/**'
   pull_request:
-    paths-ignore:
-      - 'project-dss/**'
     branches:
       - master
+    paths-ignore:
+      - 'project-dss/**'
 
 jobs:
   build:
