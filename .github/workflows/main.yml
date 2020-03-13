@@ -5,12 +5,12 @@ on:
     branches:
       - master
     paths-ignore:
-      - '!**/project-dss/**'
+      - '/project-dss/**'
   pull_request:
     branches:
       - master
     paths-ignore:
-      - '!**/project-dss/**'
+      - '/project-dss/**'
 
 jobs:
   build:
