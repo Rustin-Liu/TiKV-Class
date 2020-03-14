@@ -1,0 +1,21 @@
+name: TiKV-Class-DSS
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    paths:
+      - '**/project-dss/**'
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build and Test project dss
+      working-directory: ./project-dss
+      run: |
+        make test_others
