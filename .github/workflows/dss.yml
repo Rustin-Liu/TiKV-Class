@@ -14,8 +14,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
-    - name: Build and Test project dss
-      working-directory: ./project-dss
-      run: |
-        make test_others
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly-2020-03-01
+          components: rustfmt, clippy
+      - name: Build and Test project dss
+        working-directory: ./project-dss
+        run: |
+          make test_others
