@@ -6,7 +6,7 @@ use crate::proto::kvraftpb::*;
 use crate::raft;
 
 pub struct KvServer {
-    pub rf: raft::Node,
+    pub rf: raft::node::Node,
     me: usize,
     // snapshot if log grows this big
     maxraftstate: Option<usize>,
