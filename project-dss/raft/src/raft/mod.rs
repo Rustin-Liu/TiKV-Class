@@ -18,15 +18,33 @@ use self::errors::*;
 use self::node::*;
 use self::persister::*;
 use crate::proto::raftpb::*;
+use futures::future::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::SystemTime;
 
 /// State of a raft peer.
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct State {
     pub term: u64,
     pub is_leader: bool,
     pub voted_for: Option<usize>,
     // Peer current role.
     pub role: Role,
+    pub leader_id: Option<usize>,
+    pub last_receive_time: SystemTime,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        State {
+            term: 0,
+            is_leader: false,
+            voted_for: None,
+            role: Default::default(),
+            leader_id: None,
+            last_receive_time: SystemTime::now(),
+        }
+    }
 }
 
 impl State {
@@ -39,11 +57,25 @@ impl State {
         self.is_leader
     }
 
-    #[allow(dead_code)]
-    fn convert_to_candidate(&mut self, peer_id: usize) {
+    fn convert_to_candidate(&mut self, voted_for: usize) {
         self.role = Role::Candidate;
         self.term += 1;
-        self.voted_for = Some(peer_id);
+        self.voted_for = Some(voted_for);
+        self.last_receive_time = SystemTime::now();
+    }
+
+    fn convert_to_follower(&mut self, new_term: u64) {
+        self.role = Role::Follower;
+        self.term = new_term;
+        self.voted_for = None;
+        self.last_receive_time = SystemTime::now();
+    }
+
+    fn convert_to_leader(&mut self, leader_id: usize) {
+        self.role = Role::Leader;
+        self.leader_id = Some(leader_id);
+        self.is_leader = true;
+        self.last_receive_time = SystemTime::now();
     }
 }
 
@@ -56,6 +88,7 @@ pub struct Raft {
     // this peer's index into peers[]
     me: usize,
     state: Arc<State>,
+    dead: AtomicBool,
 }
 
 impl Raft {
@@ -71,22 +104,19 @@ impl Raft {
         peers: Vec<RaftClient>,
         me: usize,
         persister: Box<dyn Persister>,
-        apply_ch: UnboundedSender<ApplyMsg>,
+        _apply_ch: UnboundedSender<ApplyMsg>,
     ) -> Raft {
         let raft_state = persister.raft_state();
-
-        // Your initialization code here (2A, 2B, 2C).
         let mut rf = Raft {
             peers,
             persister,
             me,
             state: Arc::default(),
+            dead: AtomicBool::new(false),
         };
-
         // initialize from state persisted before a crash
         rf.restore(&raft_state);
-
-        crate::your_code_here((rf, apply_ch))
+        rf
     }
 
     /// save Raft's persistent state to stable storage,
@@ -141,23 +171,17 @@ impl Raft {
         server: usize,
         args: &RequestVoteArgs,
     ) -> Receiver<Result<RequestVoteReply>> {
-        // Your code here if you want the rpc becomes async.
-        // Example:
-        // ```
-        // let peer = &self.peers[server];
-        // let (tx, rx) = channel();
-        // peer.spawn(
-        //     peer.request_vote(&args)
-        //         .map_err(Error::Rpc)
-        //         .then(move |res| {
-        //             tx.send(res);
-        //             Ok(())
-        //         }),
-        // );
-        // rx
-        // ```
         let (tx, rx) = sync_channel::<Result<RequestVoteReply>>(1);
-        crate::your_code_here((server, args, tx, rx))
+        let peer = &self.peers[server];
+        peer.spawn(
+            peer.request_vote(&args)
+                .map_err(Error::Rpc)
+                .then(move |res| {
+                    tx.send(res).unwrap();
+                    Ok(())
+                }),
+        );
+        rx
     }
 
     fn start<M>(&self, command: &M) -> Result<(u64, u64)>
@@ -176,6 +200,10 @@ impl Raft {
         } else {
             Err(Error::NotLeader)
         }
+    }
+
+    fn kill(&self) {
+        self.dead.store(true, Ordering::SeqCst);
     }
 }
 

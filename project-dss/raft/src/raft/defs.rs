@@ -4,7 +4,7 @@ pub struct ApplyMsg {
     pub command_index: u64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Role {
     Follower,
     Leader,
@@ -16,3 +16,5 @@ impl Default for Role {
         Role::Follower
     }
 }
+
+pub const HEARTBEAT_INTERVAL: u64 = 50;

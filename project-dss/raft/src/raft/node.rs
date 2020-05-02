@@ -1,33 +1,50 @@
 use crate::proto::raftpb::*;
-use crate::raft::defs::Role;
+use crate::raft::defs::{Role, HEARTBEAT_INTERVAL};
 use crate::raft::errors::*;
 use crate::raft::{Raft, State};
+use futures::future;
 use labrpc::RpcFuture;
+use rand::Rng;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, SystemTime};
 
-// Choose concurrency paradigm.
-//
-// You can either drive the raft state machine by the rpc framework,
-//
-// ```rust
-// struct Node { raft: Arc<Mutex<Raft>> }
-// ```
-//
-// or spawn a new thread runs the raft state machine and communicate via
-// a channel.
-//
-// ```rust
-// struct Node { sender: Sender<Msg> }
-// ```
 #[derive(Clone)]
 pub struct Node {
-    // Your code here.
+    raft: Arc<Mutex<Raft>>,
 }
 
 impl Node {
     /// Create a new raft service.
     pub fn new(raft: Raft) -> Node {
-        // Your code here.
-        crate::your_code_here(raft)
+        let node = Node {
+            raft: Arc::new(Mutex::new(raft)),
+        };
+        node.start_leader_election();
+        node
+    }
+
+    fn start_leader_election(&self) {
+        let mut rng = rand::thread_rng();
+        loop {
+            let state = Arc::clone(&self.raft.lock().unwrap().state);
+            let state = Arc::try_unwrap(state).unwrap();
+            let election_timeout = rng.gen_range(0, 300);
+            let start_time = SystemTime::now();
+            thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL + election_timeout));
+            let raft = Arc::clone(&self.raft);
+            if raft.lock().unwrap().dead.load(Ordering::SeqCst) {
+                return;
+            }
+            thread::spawn(move || {
+                let timeout = state.last_receive_time.duration_since(start_time).unwrap()
+                    > Duration::from_millis(0);
+                if timeout {
+                    kick_off_election(raft);
+                }
+            });
+        }
     }
 
     /// the service using Raft (e.g. a k/v server) wants to start
@@ -46,36 +63,23 @@ impl Node {
     where
         M: labcodec::Message,
     {
-        // Your code here.
-        // Example:
-        // self.raft.start(command)
-        crate::your_code_here(command)
+        self.raft.lock().unwrap().start(command)
     }
 
     /// The current term of this peer.
     pub fn term(&self) -> u64 {
-        // Your code here.
-        // Example:
-        // self.raft.term
-        crate::your_code_here(())
+        self.raft.lock().unwrap().state.term()
     }
 
     /// Whether this peer believes it is the leader.
     pub fn is_leader(&self) -> bool {
-        // Your code here.
-        // Example:
-        // self.raft.leader_id == self.id
-        crate::your_code_here(())
+        self.raft.lock().unwrap().state.is_leader()
     }
 
     /// The current state of this peer.
     pub fn get_state(&self) -> State {
-        State {
-            term: self.term(),
-            is_leader: self.is_leader(),
-            voted_for: None,
-            role: Role::Follower,
-        }
+        let state = Arc::clone(&self.raft.lock().unwrap().state);
+        Arc::try_unwrap(state).unwrap()
     }
 
     /// the tester calls kill() when a Raft instance won't be
@@ -87,7 +91,34 @@ impl Node {
     /// a VIRTUAL crash in tester, so take care of background
     /// threads you generated with this Raft Node.
     pub fn kill(&self) {
-        // Your code here, if desired.
+        self.raft.lock().unwrap().kill();
+    }
+}
+
+fn kick_off_election(raft: Arc<Mutex<Raft>>) {
+    let raft = raft.lock().unwrap();
+    let mut state = Arc::try_unwrap(Arc::clone(&raft.state)).unwrap();
+    state.convert_to_candidate(raft.me);
+    let request_vote_args = RequestVoteArgs {
+        term: state.term,
+        candidate_id: raft.me as u64,
+    };
+    let mut get_voted_num = 1;
+    for (peer_id, _peer) in raft.peers.iter().enumerate() {
+        if peer_id != raft.me {
+            let receiver = raft.send_request_vote(peer_id, &request_vote_args);
+            let reply = receiver.recv().unwrap().unwrap();
+            if reply.term > state.term {
+                state.convert_to_follower(reply.term);
+                return;
+            }
+            if reply.vote_granted {
+                get_voted_num += 1;
+                if get_voted_num > raft.peers.len() / 2 && raft.state.role == Role::Candidate {
+                    state.convert_to_leader(raft.me);
+                }
+            }
+        }
     }
 }
 
@@ -96,7 +127,21 @@ impl RaftService for Node {
     //
     // CAVEATS: Please avoid locking or sleeping here, it may jam the network.
     fn request_vote(&self, args: RequestVoteArgs) -> RpcFuture<RequestVoteReply> {
-        // Your code here (2A, 2B).
-        crate::your_code_here(args)
+        let raft = self.raft.lock().unwrap();
+        let mut state = Arc::try_unwrap(Arc::clone(&raft.state)).unwrap();
+        let mut reply = RequestVoteReply::default();
+        reply.term = state.term;
+        if args.term < state.term {
+            reply.vote_granted = false;
+        } else {
+            if args.term > state.term {
+                state.convert_to_follower(args.term);
+            }
+            if state.voted_for.is_none() {
+                state.voted_for = Some(args.candidate_id as usize);
+                reply.vote_granted = true;
+            }
+        }
+        Box::new(future::result(Ok(reply)))
     }
 }
