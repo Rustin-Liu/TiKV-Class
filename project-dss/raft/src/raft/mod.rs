@@ -1,5 +1,4 @@
 use std::sync::mpsc::{sync_channel, Receiver};
-use std::sync::Arc;
 
 use futures::sync::mpsc::UnboundedSender;
 
@@ -15,7 +14,6 @@ mod tests;
 
 use self::defs::*;
 use self::errors::*;
-use self::node::*;
 use self::persister::*;
 use crate::proto::raftpb::*;
 use futures::future::*;
@@ -87,7 +85,7 @@ pub struct Raft {
     persister: Box<dyn Persister>,
     // this peer's index into peers[]
     me: usize,
-    state: Arc<State>,
+    state: State,
     dead: AtomicBool,
 }
 
@@ -111,7 +109,7 @@ impl Raft {
             peers,
             persister,
             me,
-            state: Arc::default(),
+            state: State::default(),
             dead: AtomicBool::new(false),
         };
         // initialize from state persisted before a crash

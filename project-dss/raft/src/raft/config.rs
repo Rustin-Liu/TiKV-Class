@@ -8,6 +8,7 @@ use futures::{sync::mpsc::unbounded, Future, Stream};
 
 use crate::proto::raftpb::*;
 use crate::raft;
+use crate::raft::node::Node;
 use crate::raft::persister::*;
 use rand::Rng;
 
@@ -63,7 +64,7 @@ pub struct Config {
     pub net: labrpc::Network,
     n: usize,
     // use boxed slice to prohibit grow capacity.
-    pub rafts: Arc<Mutex<Box<[Option<raft::Node>]>>>,
+    pub rafts: Arc<Mutex<Box<[Option<Node>]>>>,
     // whether each server is on the net
     pub connected: Box<[bool]>,
     saved: Box<[Arc<SimplePersister>]>,
@@ -415,7 +416,7 @@ impl Config {
         self.net.spawn_poller(apply);
 
         let rf = raft::Raft::new(clients, i, Box::new(self.saved[i].clone()), tx);
-        let node = raft::Node::new(rf);
+        let node = Node::new(rf);
         self.rafts.lock().unwrap()[i] = Some(node.clone());
 
         let mut builder = labrpc::ServerBuilder::new(format!("{}", i));

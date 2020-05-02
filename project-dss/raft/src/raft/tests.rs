@@ -11,7 +11,7 @@ use futures::{future, Future};
 use rand::{Rng, ThreadRng};
 
 use crate::raft::config::{Config, Entry, Storage};
-use crate::raft::Node;
+use crate::raft::node::Node;
 
 /// The tester generously allows solutions to complete elections in one second
 /// (much more than the paper's range of timeouts).

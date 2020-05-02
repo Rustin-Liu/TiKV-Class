@@ -18,33 +18,12 @@ pub struct Node {
 impl Node {
     /// Create a new raft service.
     pub fn new(raft: Raft) -> Node {
-        let node = Node {
-            raft: Arc::new(Mutex::new(raft)),
-        };
-        node.start_leader_election();
-        node
-    }
-
-    fn start_leader_election(&self) {
-        let mut rng = rand::thread_rng();
-        loop {
-            let state = Arc::clone(&self.raft.lock().unwrap().state);
-            let state = Arc::try_unwrap(state).unwrap();
-            let election_timeout = rng.gen_range(0, 300);
-            let start_time = SystemTime::now();
-            thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL + election_timeout));
-            let raft = Arc::clone(&self.raft);
-            if raft.lock().unwrap().dead.load(Ordering::SeqCst) {
-                return;
-            }
-            thread::spawn(move || {
-                let timeout = state.last_receive_time.duration_since(start_time).unwrap()
-                    > Duration::from_millis(0);
-                if timeout {
-                    kick_off_election(raft);
-                }
-            });
-        }
+        let raft = Arc::new(Mutex::new(raft));
+        let raft_c = Arc::clone(&raft);
+        thread::spawn(|| {
+            start_leader_election(raft_c);
+        });
+        Node { raft }
     }
 
     /// the service using Raft (e.g. a k/v server) wants to start
@@ -78,8 +57,7 @@ impl Node {
 
     /// The current state of this peer.
     pub fn get_state(&self) -> State {
-        let state = Arc::clone(&self.raft.lock().unwrap().state);
-        Arc::try_unwrap(state).unwrap()
+        self.raft.lock().unwrap().state.clone()
     }
 
     /// the tester calls kill() when a Raft instance won't be
@@ -95,9 +73,30 @@ impl Node {
     }
 }
 
+fn start_leader_election(raft: Arc<Mutex<Raft>>) {
+    let mut rng = rand::thread_rng();
+    loop {
+        let state = raft.lock().unwrap().state.clone();
+        let election_timeout = rng.gen_range(0, 300);
+        let start_time = SystemTime::now();
+        thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL + election_timeout));
+        let raft = Arc::clone(&raft);
+        if raft.lock().unwrap().dead.load(Ordering::SeqCst) {
+            return;
+        }
+        thread::spawn(move || {
+            let timeout = start_time.duration_since(state.last_receive_time).unwrap()
+                > Duration::from_millis(0);
+            if timeout {
+                kick_off_election(raft);
+            }
+        });
+    }
+}
+
 fn kick_off_election(raft: Arc<Mutex<Raft>>) {
     let raft = raft.lock().unwrap();
-    let mut state = Arc::try_unwrap(Arc::clone(&raft.state)).unwrap();
+    let mut state = raft.state.clone();
     state.convert_to_candidate(raft.me);
     let request_vote_args = RequestVoteArgs {
         term: state.term,
@@ -128,7 +127,7 @@ impl RaftService for Node {
     // CAVEATS: Please avoid locking or sleeping here, it may jam the network.
     fn request_vote(&self, args: RequestVoteArgs) -> RpcFuture<RequestVoteReply> {
         let raft = self.raft.lock().unwrap();
-        let mut state = Arc::try_unwrap(Arc::clone(&raft.state)).unwrap();
+        let mut state = raft.state.clone();
         let mut reply = RequestVoteReply::default();
         reply.term = state.term;
         if args.term < state.term {
