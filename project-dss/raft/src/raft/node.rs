@@ -47,17 +47,17 @@ impl Node {
 
     /// The current term of this peer.
     pub fn term(&self) -> u64 {
-        self.raft.lock().unwrap().state.term()
+        self.raft.lock().unwrap().state.borrow().term()
     }
 
     /// Whether this peer believes it is the leader.
     pub fn is_leader(&self) -> bool {
-        self.raft.lock().unwrap().state.is_leader()
+        self.raft.lock().unwrap().state.borrow().is_leader()
     }
 
     /// The current state of this peer.
     pub fn get_state(&self) -> State {
-        self.raft.lock().unwrap().state.clone()
+        self.raft.lock().unwrap().state.borrow().clone()
     }
 
     /// the tester calls kill() when a Raft instance won't be
@@ -76,7 +76,7 @@ impl Node {
 fn start_leader_election(raft: Arc<Mutex<Raft>>) {
     let mut rng = rand::thread_rng();
     loop {
-        let state = raft.lock().unwrap().state.clone();
+        let state = raft.lock().unwrap().state.borrow().clone();
         let election_timeout = rng.gen_range(0, 300);
         let start_time = SystemTime::now();
         thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL + election_timeout));
@@ -96,8 +96,9 @@ fn start_leader_election(raft: Arc<Mutex<Raft>>) {
 
 fn kick_off_election(raft: Arc<Mutex<Raft>>) {
     let raft = raft.lock().unwrap();
-    let mut state = raft.state.clone();
-    state.convert_to_candidate(raft.me);
+    let state = raft.state.borrow().clone();
+    info!("{}: kicks off election on term: {}", raft.me, state.term);
+    raft.convert_to_candidate(raft.me);
     let request_vote_args = RequestVoteArgs {
         term: state.term,
         candidate_id: raft.me as u64,
@@ -105,16 +106,19 @@ fn kick_off_election(raft: Arc<Mutex<Raft>>) {
     let mut get_voted_num = 1;
     for (peer_id, _peer) in raft.peers.iter().enumerate() {
         if peer_id != raft.me {
+            info!("{}: send vote request to {}", raft.me, peer_id);
             let receiver = raft.send_request_vote(peer_id, &request_vote_args);
             let reply = receiver.recv().unwrap().unwrap();
             if reply.term > state.term {
-                state.convert_to_follower(reply.term);
+                raft.convert_to_follower(reply.term);
                 return;
             }
             if reply.vote_granted {
+                info!("{}: get granted from {}", raft.me, peer_id);
                 get_voted_num += 1;
-                if get_voted_num > raft.peers.len() / 2 && raft.state.role == Role::Candidate {
-                    state.convert_to_leader(raft.me);
+                if get_voted_num > raft.peers.len() / 2 && state.role == Role::Candidate {
+                    info!("{}: became leader on term {}", raft.me, state.term);
+                    raft.convert_to_leader(raft.me);
                 }
             }
         }
@@ -122,23 +126,22 @@ fn kick_off_election(raft: Arc<Mutex<Raft>>) {
 }
 
 impl RaftService for Node {
-    // example RequestVote RPC handler.
-    //
-    // CAVEATS: Please avoid locking or sleeping here, it may jam the network.
     fn request_vote(&self, args: RequestVoteArgs) -> RpcFuture<RequestVoteReply> {
         let raft = self.raft.lock().unwrap();
-        let mut state = raft.state.clone();
+        info!("{}: get vote request from {}", raft.me, args.candidate_id);
+        let mut state = raft.state.borrow().clone();
         let mut reply = RequestVoteReply::default();
         reply.term = state.term;
         if args.term < state.term {
             reply.vote_granted = false;
         } else {
             if args.term > state.term {
-                state.convert_to_follower(args.term);
+                raft.convert_to_follower(args.term);
             }
             if state.voted_for.is_none() {
                 state.voted_for = Some(args.candidate_id as usize);
                 reply.vote_granted = true;
+                info!("{}: vote for {}", raft.me, args.candidate_id);
             }
         }
         Box::new(future::result(Ok(reply)))

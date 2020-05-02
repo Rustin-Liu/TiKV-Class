@@ -17,6 +17,7 @@ use self::errors::*;
 use self::persister::*;
 use crate::proto::raftpb::*;
 use futures::future::*;
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
@@ -54,27 +55,6 @@ impl State {
     pub fn is_leader(&self) -> bool {
         self.is_leader
     }
-
-    fn convert_to_candidate(&mut self, voted_for: usize) {
-        self.role = Role::Candidate;
-        self.term += 1;
-        self.voted_for = Some(voted_for);
-        self.last_receive_time = SystemTime::now();
-    }
-
-    fn convert_to_follower(&mut self, new_term: u64) {
-        self.role = Role::Follower;
-        self.term = new_term;
-        self.voted_for = None;
-        self.last_receive_time = SystemTime::now();
-    }
-
-    fn convert_to_leader(&mut self, leader_id: usize) {
-        self.role = Role::Leader;
-        self.leader_id = Some(leader_id);
-        self.is_leader = true;
-        self.last_receive_time = SystemTime::now();
-    }
 }
 
 // A single Raft peer.
@@ -85,7 +65,7 @@ pub struct Raft {
     persister: Box<dyn Persister>,
     // this peer's index into peers[]
     me: usize,
-    state: State,
+    state: RefCell<State>,
     dead: AtomicBool,
 }
 
@@ -109,12 +89,33 @@ impl Raft {
             peers,
             persister,
             me,
-            state: State::default(),
+            state: RefCell::from(State::default()),
             dead: AtomicBool::new(false),
         };
         // initialize from state persisted before a crash
         rf.restore(&raft_state);
         rf
+    }
+
+    fn convert_to_candidate(&self, voted_for: usize) {
+        self.state.borrow_mut().role = Role::Candidate;
+        self.state.borrow_mut().term += 1;
+        self.state.borrow_mut().voted_for = Some(voted_for);
+        self.state.borrow_mut().last_receive_time = SystemTime::now();
+    }
+
+    fn convert_to_follower(&self, new_term: u64) {
+        self.state.borrow_mut().role = Role::Follower;
+        self.state.borrow_mut().term = new_term;
+        self.state.borrow_mut().voted_for = None;
+        self.state.borrow_mut().last_receive_time = SystemTime::now();
+    }
+
+    fn convert_to_leader(&self, leader_id: usize) {
+        self.state.borrow_mut().role = Role::Leader;
+        self.state.borrow_mut().leader_id = Some(leader_id);
+        self.state.borrow_mut().is_leader = true;
+        self.state.borrow_mut().last_receive_time = SystemTime::now();
     }
 
     /// save Raft's persistent state to stable storage,
