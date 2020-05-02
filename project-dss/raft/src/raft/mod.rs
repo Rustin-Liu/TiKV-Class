@@ -5,18 +5,18 @@ use futures::sync::mpsc::UnboundedSender;
 
 #[cfg(test)]
 pub mod config;
+pub mod defs;
 pub mod errors;
 pub mod node;
 pub mod persister;
-pub mod types;
 
 #[cfg(test)]
 mod tests;
 
+use self::defs::*;
 use self::errors::*;
 use self::node::*;
 use self::persister::*;
-use self::types::*;
 use crate::proto::raftpb::*;
 
 /// State of a raft peer.

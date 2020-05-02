@@ -1,6 +1,6 @@
 use crate::proto::raftpb::*;
+use crate::raft::defs::Role;
 use crate::raft::errors::*;
-use crate::raft::types::Role;
 use crate::raft::{Raft, State};
 use labrpc::RpcFuture;
 
