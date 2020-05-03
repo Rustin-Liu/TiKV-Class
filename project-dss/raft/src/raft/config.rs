@@ -7,8 +7,9 @@ use std::time::{Duration, Instant};
 use futures::{sync::mpsc::unbounded, Future, Stream};
 
 use crate::proto::raftpb::*;
-use crate::raft;
+use crate::raft::defs::ApplyMsg;
 use crate::raft::node::Node;
+use crate::raft::peer::RaftPeer;
 use crate::raft::persister::*;
 use rand::Rng;
 
@@ -378,7 +379,7 @@ impl Config {
         let (tx, apply_ch) = unbounded();
         let storage = self.storage.clone();
         let apply = apply_ch
-            .for_each(move |cmd: raft::ApplyMsg| {
+            .for_each(move |cmd: ApplyMsg| {
                 if !cmd.command_valid {
                     // ignore other types of ApplyMsg
                     return Ok(());
@@ -415,12 +416,12 @@ impl Config {
             .map_err(move |e| debug!("raft {} apply stopped: {:?}", i, e));
         self.net.spawn_poller(apply);
 
-        let rf = raft::Raft::new(clients, i, Box::new(self.saved[i].clone()), tx);
+        let rf = RaftPeer::new(clients, i, Box::new(self.saved[i].clone()), tx);
         let node = Node::new(rf);
         self.rafts.lock().unwrap()[i] = Some(node.clone());
 
         let mut builder = labrpc::ServerBuilder::new(format!("{}", i));
-        raft::add_raft_service(node, &mut builder).unwrap();
+        add_raft_service(node, &mut builder).unwrap();
         let srv = builder.build();
         self.net.add_server(srv);
     }

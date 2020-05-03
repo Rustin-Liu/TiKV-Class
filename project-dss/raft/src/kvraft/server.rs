@@ -4,6 +4,8 @@ use labrpc::RpcFuture;
 
 use crate::proto::kvraftpb::*;
 use crate::raft;
+use crate::raft::defs::State;
+use crate::raft::peer::RaftPeer;
 
 pub struct KvServer {
     pub rf: raft::node::Node,
@@ -23,7 +25,7 @@ impl KvServer {
         // You may need initialization code here.
 
         let (tx, apply_ch) = unbounded();
-        let rf = raft::Raft::new(servers, me, persister, tx);
+        let rf = RaftPeer::new(servers, me, persister, tx);
 
         crate::your_code_here((rf, maxraftstate, apply_ch))
     }
@@ -86,9 +88,9 @@ impl Node {
         self.get_state().is_leader()
     }
 
-    pub fn get_state(&self) -> raft::State {
+    pub fn get_state(&self) -> State {
         // Your code here.
-        raft::State {
+        State {
             ..Default::default()
         }
     }
