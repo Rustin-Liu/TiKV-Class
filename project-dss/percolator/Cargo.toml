@@ -17,7 +17,7 @@ labrpc = { path = "../labrpc" }
 labcodec = { path = "../labcodec" }
 
 [build-dependencies]
-prost-build = "0.5.0"
+prost-build = "0.6"
 
 [dev-dependencies]
 env_logger = "0.6"

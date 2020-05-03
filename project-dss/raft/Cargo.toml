@@ -27,4 +27,4 @@ futures-timer = "0.1"
 env_logger = "0.6"
 
 [build-dependencies]
-prost-build = "0.5"
+prost-build = "0.6"

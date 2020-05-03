@@ -13,4 +13,4 @@ bytes = "0.4.7"
 prost-derive = "0.6"
 
 [build-dependencies]
-prost-build = "0.5"
+prost-build = "0.6"
