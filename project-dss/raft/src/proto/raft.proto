@@ -13,3 +13,13 @@ message RequestVoteReply {
   uint64 term = 1;
   bool vote_granted = 2;
 }
+
+message AppendLogArgs {
+  uint64 term = 1;
+  uint64 leader_id = 2;
+}
+
+message AppendLogReply {
+  uint64 term = 1;
+  bool success = 2;
+}

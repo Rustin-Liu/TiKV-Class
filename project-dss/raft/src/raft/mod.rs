@@ -19,7 +19,7 @@ use crate::proto::raftpb::*;
 use futures::future::*;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::SystemTime;
+use std::time::Instant;
 
 /// State of a raft peer.
 #[derive(Clone, Debug)]
@@ -30,7 +30,7 @@ pub struct State {
     // Peer current role.
     pub role: Role,
     pub leader_id: Option<usize>,
-    pub last_receive_time: SystemTime,
+    pub last_receive_time: Instant,
 }
 
 impl Default for State {
@@ -41,7 +41,7 @@ impl Default for State {
             voted_for: None,
             role: Default::default(),
             leader_id: None,
-            last_receive_time: SystemTime::now(),
+            last_receive_time: Instant::now(),
         }
     }
 }
@@ -98,24 +98,27 @@ impl Raft {
     }
 
     fn convert_to_candidate(&self, voted_for: usize) {
-        self.state.borrow_mut().role = Role::Candidate;
-        self.state.borrow_mut().term += 1;
-        self.state.borrow_mut().voted_for = Some(voted_for);
-        self.state.borrow_mut().last_receive_time = SystemTime::now();
+        let mut state = self.state.borrow_mut();
+        state.role = Role::Candidate;
+        state.term += 1;
+        state.voted_for = Some(voted_for);
+        state.last_receive_time = Instant::now();
     }
 
     fn convert_to_follower(&self, new_term: u64) {
-        self.state.borrow_mut().role = Role::Follower;
-        self.state.borrow_mut().term = new_term;
-        self.state.borrow_mut().voted_for = None;
-        self.state.borrow_mut().last_receive_time = SystemTime::now();
+        let mut state = self.state.borrow_mut();
+        state.role = Role::Follower;
+        state.term = new_term;
+        state.voted_for = None;
+        state.last_receive_time = Instant::now();
     }
 
     fn convert_to_leader(&self, leader_id: usize) {
-        self.state.borrow_mut().role = Role::Leader;
-        self.state.borrow_mut().leader_id = Some(leader_id);
-        self.state.borrow_mut().is_leader = true;
-        self.state.borrow_mut().last_receive_time = SystemTime::now();
+        let mut state = self.state.borrow_mut();
+        state.role = Role::Leader;
+        state.leader_id = Some(leader_id);
+        state.is_leader = true;
+        state.last_receive_time = Instant::now();
     }
 
     /// save Raft's persistent state to stable storage,
@@ -180,6 +183,20 @@ impl Raft {
                     Ok(())
                 }),
         );
+        rx
+    }
+
+    fn send_append_log(
+        &self,
+        server: usize,
+        args: &AppendLogArgs,
+    ) -> Receiver<Result<AppendLogReply>> {
+        let (tx, rx) = sync_channel::<Result<AppendLogReply>>(1);
+        let peer = &self.peers[server];
+        peer.spawn(peer.append_log(&args).map_err(Error::Rpc).then(move |res| {
+            tx.send(res).unwrap();
+            Ok(())
+        }));
         rx
     }
 

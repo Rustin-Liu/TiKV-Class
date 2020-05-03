@@ -8,7 +8,7 @@ use rand::Rng;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant};
 
 #[derive(Clone)]
 pub struct Node {
@@ -47,12 +47,12 @@ impl Node {
 
     /// The current term of this peer.
     pub fn term(&self) -> u64 {
-        self.raft.lock().unwrap().state.borrow().term()
+        self.get_state().term()
     }
 
     /// Whether this peer believes it is the leader.
     pub fn is_leader(&self) -> bool {
-        self.raft.lock().unwrap().state.borrow().is_leader()
+        self.get_state().is_leader()
     }
 
     /// The current state of this peer.
@@ -73,20 +73,74 @@ impl Node {
     }
 }
 
-fn start_leader_election(raft: Arc<Mutex<Raft>>) {
+impl RaftService for Node {
+    fn request_vote(&self, args: RequestVoteArgs) -> RpcFuture<RequestVoteReply> {
+        let raft = self.raft.lock().unwrap();
+        info!("{}: get vote request from {}", raft.me, args.candidate_id);
+        let mut state = raft.state.borrow_mut();
+        let mut reply = RequestVoteReply::default();
+        reply.term = state.term;
+        if args.term < state.term {
+            reply.vote_granted = false;
+        } else {
+            if args.term > state.term {
+                raft.convert_to_follower(args.term);
+            }
+            if state.voted_for.is_none() {
+                state.voted_for = Some(args.candidate_id as usize);
+                state.last_receive_time = Instant::now();
+                reply.vote_granted = true;
+                info!("{}: vote for {}", raft.me, args.candidate_id);
+            }
+        }
+        Box::new(future::result(Ok(reply)))
+    }
+
+    fn append_log(&self, args: AppendLogArgs) -> RpcFuture<AppendLogReply> {
+        let raft = self.raft.lock().unwrap();
+        info!("{}: get append log from {}", raft.me, args.leader_id);
+        let mut state = raft.state.borrow_mut();
+        if args.term < state.term {
+            return Box::new(future::result(Ok(AppendLogReply {
+                term: state.term,
+                success: false,
+            })));
+        }
+        state.leader_id = Some(args.leader_id as usize);
+        state.last_receive_time = Instant::now();
+
+        if args.term > state.term {
+            raft.convert_to_follower(args.term)
+        }
+        Box::new(future::result(Ok(AppendLogReply {
+            term: state.term,
+            success: true,
+        })))
+    }
+}
+
+fn start_leader_election(raft_arc: Arc<Mutex<Raft>>) {
     let mut rng = rand::thread_rng();
+    info!("{}: started", raft_arc.lock().unwrap().me);
     loop {
-        let state = raft.lock().unwrap().state.borrow().clone();
+        let start_time = Instant::now();
+        info!("{}: start at {:?}", raft_arc.lock().unwrap().me, start_time);
         let election_timeout = rng.gen_range(0, 300);
-        let start_time = SystemTime::now();
         thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL + election_timeout));
-        let raft = Arc::clone(&raft);
+        let raft = Arc::clone(&raft_arc);
         if raft.lock().unwrap().dead.load(Ordering::SeqCst) {
             return;
         }
+        let last_receive_time = raft_arc.lock().unwrap().state.borrow().last_receive_time;
+        info!(
+            "{}: last receive time at {:?}",
+            raft_arc.lock().unwrap().me,
+            last_receive_time
+        );
         thread::spawn(move || {
-            let timeout = start_time.duration_since(state.last_receive_time).unwrap()
-                > Duration::from_millis(0);
+            let timeout = last_receive_time
+                .checked_duration_since(start_time)
+                .is_none();
             if timeout {
                 kick_off_election(raft);
             }
@@ -94,8 +148,8 @@ fn start_leader_election(raft: Arc<Mutex<Raft>>) {
     }
 }
 
-fn kick_off_election(raft: Arc<Mutex<Raft>>) {
-    let raft = raft.lock().unwrap();
+fn kick_off_election(raft_arc: Arc<Mutex<Raft>>) {
+    let raft = raft_arc.lock().unwrap();
     let state = raft.state.borrow().clone();
     info!("{}: kicks off election on term: {}", raft.me, state.term);
     raft.convert_to_candidate(raft.me);
@@ -119,31 +173,40 @@ fn kick_off_election(raft: Arc<Mutex<Raft>>) {
                 if get_voted_num > raft.peers.len() / 2 && state.role == Role::Candidate {
                     info!("{}: became leader on term {}", raft.me, state.term);
                     raft.convert_to_leader(raft.me);
+                    let raft_arc = Arc::clone(&raft_arc);
+                    thread::spawn(|| {
+                        replica_log_to_peers(raft_arc);
+                    });
                 }
             }
         }
     }
 }
 
-impl RaftService for Node {
-    fn request_vote(&self, args: RequestVoteArgs) -> RpcFuture<RequestVoteReply> {
-        let raft = self.raft.lock().unwrap();
-        info!("{}: get vote request from {}", raft.me, args.candidate_id);
-        let mut state = raft.state.borrow().clone();
-        let mut reply = RequestVoteReply::default();
-        reply.term = state.term;
-        if args.term < state.term {
-            reply.vote_granted = false;
-        } else {
-            if args.term > state.term {
-                raft.convert_to_follower(args.term);
-            }
-            if state.voted_for.is_none() {
-                state.voted_for = Some(args.candidate_id as usize);
-                reply.vote_granted = true;
-                info!("{}: vote for {}", raft.me, args.candidate_id);
-            }
+fn replica_log_to_peers(raft_arc: Arc<Mutex<Raft>>) {
+    let raft = raft_arc.lock().unwrap();
+    for (peer_id, _peer) in raft.peers.iter().enumerate() {
+        if peer_id != raft.me {
+            info!("{}: start send log to {}", raft.me, peer_id);
+            let raft = Arc::clone(&raft_arc);
+            thread::spawn(move || loop {
+                let raft = raft.lock().unwrap();
+                let state = raft.state.borrow();
+                if state.role != Role::Leader {
+                    return;
+                }
+                let append_log_args = AppendLogArgs {
+                    term: state.term,
+                    leader_id: raft.me as u64,
+                };
+                let receiver = raft.send_append_log(peer_id, &append_log_args);
+                let reply = receiver.recv().unwrap().unwrap();
+                info!("{}: get append reply form {}", raft.me, peer_id);
+                if reply.term > state.term {
+                    raft.convert_to_follower(reply.term);
+                }
+                thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL));
+            });
         }
-        Box::new(future::result(Ok(reply)))
     }
 }
