@@ -21,7 +21,6 @@ pub struct RaftPeer {
     pub voted_for: Option<usize>,
     // Peer current role.
     pub role: Role,
-    pub leader_id: Option<usize>,
     pub last_receive_time: Instant,
     pub dead: AtomicBool,
 }
@@ -50,7 +49,6 @@ impl RaftPeer {
             is_leader: false,
             voted_for: None,
             role: Default::default(),
-            leader_id: None,
             last_receive_time: Instant::now(),
             dead: AtomicBool::new(false),
         };
@@ -63,6 +61,7 @@ impl RaftPeer {
         self.role = Role::Candidate;
         self.term += 1;
         self.voted_for = Some(self.me);
+        self.is_leader = false;
         self.last_receive_time = Instant::now();
     }
 
@@ -70,12 +69,12 @@ impl RaftPeer {
         self.role = Role::Follower;
         self.term = new_term;
         self.voted_for = None;
+        self.is_leader = false;
         self.last_receive_time = Instant::now();
     }
 
     pub fn convert_to_leader(&mut self) {
         self.role = Role::Leader;
-        self.leader_id = Some(self.me);
         self.is_leader = true;
         self.last_receive_time = Instant::now();
     }

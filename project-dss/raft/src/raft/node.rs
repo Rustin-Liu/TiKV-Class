@@ -108,7 +108,6 @@ impl RaftService for Node {
                 success: false,
             })));
         }
-        raft.leader_id = Some(args.leader_id as usize);
         raft.last_receive_time = Instant::now();
 
         if args.term > raft.term {
@@ -132,13 +131,13 @@ fn start_leader_election(raft_arc: Arc<Mutex<RaftPeer>>) {
             return;
         }
         let last_receive_time = raft.last_receive_time;
-        let raft = Arc::clone(&raft_arc);
+        let raft_arc = Arc::clone(&raft_arc);
         thread::spawn(move || {
             let timeout = last_receive_time
                 .checked_duration_since(start_time)
                 .is_none();
             if timeout {
-                kick_off_election(raft);
+                kick_off_election(raft_arc);
             }
         });
     }
@@ -159,21 +158,33 @@ fn kick_off_election(raft_arc: Arc<Mutex<RaftPeer>>) {
         if peer_id != me {
             info!("{}: send vote request to {}", me, peer_id);
             let receiver = raft.send_request_vote(peer_id, &request_vote_args);
-            let reply = receiver.recv().unwrap().unwrap();
-            if reply.term > raft.term {
-                raft.convert_to_follower(reply.term);
-                return;
-            }
-            if reply.vote_granted {
-                info!("{}: get granted from {}", me, peer_id);
-                get_voted_num += 1;
-                if get_voted_num > raft.peers.len() / 2 && raft.role == Role::Candidate {
-                    info!("{}: became leader on term {}", me, raft.term);
-                    raft.convert_to_leader();
-                    let raft_arc = Arc::clone(&raft_arc);
-                    thread::spawn(|| {
-                        replica_log_to_peers(raft_arc);
-                    });
+            match receiver.recv() {
+                Ok(reply) => match reply {
+                    Ok(reply) => {
+                        if reply.term > raft.term {
+                            raft.convert_to_follower(reply.term);
+                            return;
+                        }
+                        if reply.vote_granted {
+                            info!("{}: get granted from {}", me, peer_id);
+                            get_voted_num += 1;
+                            if get_voted_num > raft.peers.len() / 2 && raft.role == Role::Candidate
+                            {
+                                info!("{}: became leader on term {}", me, raft.term);
+                                raft.convert_to_leader();
+                                let raft_arc = Arc::clone(&raft_arc);
+                                thread::spawn(|| {
+                                    replica_log_to_peers(raft_arc);
+                                });
+                            }
+                        }
+                    }
+                    _ => {
+                        info!("fuck;");
+                    }
+                },
+                _ => {
+                    info!("fuck;");
                 }
             }
         }
@@ -198,10 +209,17 @@ fn replica_log_to_peers(raft_arc: Arc<Mutex<RaftPeer>>) {
                 };
                 info!("{}: start send log to {}", raft.me, peer_id);
                 let receiver = raft.send_append_log(peer_id, &append_log_args);
-                let reply = receiver.recv().unwrap().unwrap();
-                info!("{}: get append reply form {}", raft.me, peer_id);
-                if reply.term > raft.term {
-                    raft.convert_to_follower(reply.term);
+                match receiver.recv() {
+                    Ok(reply) => match reply {
+                        Ok(reply) => {
+                            info!("{}: get append reply form {}", raft.me, peer_id);
+                            if reply.term > raft.term {
+                                raft.convert_to_follower(reply.term);
+                            }
+                        }
+                        _ => return,
+                    },
+                    _ => return,
                 }
             });
         }
