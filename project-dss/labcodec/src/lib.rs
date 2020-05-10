@@ -1,4 +1,4 @@
-`//! A thin wrapper of [prost](https://docs.rs/prost/0.6.1/prost/)
+//! A thin wrapper of [prost](https://docs.rs/prost/0.6.1/prost/)
 
 /// A labcodec message.
 pub trait Message: prost::Message + Default {}
