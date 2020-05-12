@@ -10,8 +10,10 @@ use futures::stream::StreamExt;
 use rand::Rng;
 
 use crate::proto::raftpb::*;
-use crate::raft;
+use crate::raft::defs::ApplyMsg;
+use crate::raft::node::Node;
 use crate::raft::persister::*;
+use crate::raft::raft_peer::RaftPeer;
 
 static ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -65,7 +67,7 @@ pub struct Config {
     pub net: labrpc::Network,
     n: usize,
     // use boxed slice to prohibit grow capacity.
-    pub rafts: Arc<Mutex<Box<[Option<raft::Node>]>>>,
+    pub rafts: Arc<Mutex<Box<[Option<Node>]>>>,
     // whether each server is on the net
     pub connected: Box<[bool]>,
     saved: Box<[Arc<SimplePersister>]>,
@@ -378,7 +380,7 @@ impl Config {
         // listen to messages from Raft indicating newly committed messages.
         let (tx, apply_ch) = unbounded();
         let storage = self.storage.clone();
-        let apply = apply_ch.for_each(move |cmd: raft::ApplyMsg| {
+        let apply = apply_ch.for_each(move |cmd: ApplyMsg| {
             if !cmd.command_valid {
                 // ignore other types of ApplyMsg
                 return future::ready(());
@@ -414,12 +416,12 @@ impl Config {
         });
         self.net.spawn_poller(apply);
 
-        let rf = raft::Raft::new(clients, i, Box::new(self.saved[i].clone()), tx);
-        let node = raft::Node::new(rf);
+        let rf = RaftPeer::new(clients, i, Box::new(self.saved[i].clone()), tx);
+        let node = Node::new(rf);
         self.rafts.lock().unwrap()[i] = Some(node.clone());
 
         let mut builder = labrpc::ServerBuilder::new(format!("{}", i));
-        raft::add_raft_service(node, &mut builder).unwrap();
+        add_raft_service(node, &mut builder).unwrap();
         let srv = builder.build();
         self.net.add_server(srv);
     }
