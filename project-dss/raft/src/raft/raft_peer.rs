@@ -1,11 +1,12 @@
 use std::sync::mpsc::{sync_channel, Receiver};
 
-use futures::channel::mpsc::UnboundedSender;
+use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 
 use crate::proto::raftpb::*;
-use crate::raft::defs::{ApplyMsg, Role};
+use crate::raft::defs::{ActionMessage, ApplyMsg, Role};
 use crate::raft::errors::{Error, Result};
 use crate::raft::persister::Persister;
+use futures::{Stream, StreamExt, TryStream};
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
@@ -25,6 +26,9 @@ pub struct RaftPeer {
     pub last_receive_time: Instant,
     pub dead: AtomicBool,
     pub apply_ch: UnboundedSender<ApplyMsg>,
+
+    msg_sender: UnboundedSender<ActionMessage>,
+    msg_receiver: UnboundedReceiver<ActionMessage>,
 }
 
 impl RaftPeer {
@@ -43,8 +47,7 @@ impl RaftPeer {
         apply_ch: UnboundedSender<ApplyMsg>,
     ) -> RaftPeer {
         let raft_state = persister.raft_state();
-
-        // Your initialization code here (2A, 2B, 2C).
+        let (sender, receiver) = unbounded::<ActionMessage>();
         let mut rf = RaftPeer {
             peers,
             persister,
@@ -56,6 +59,8 @@ impl RaftPeer {
             last_receive_time: Instant::now(),
             dead: Default::default(),
             apply_ch,
+            msg_sender: sender,
+            msg_receiver: receiver,
         };
         // initialize from state persisted before a crash
         rf.restore(&raft_state);
@@ -149,6 +154,15 @@ impl RaftPeer {
             Ok((index, term))
         } else {
             Err(Error::NotLeader)
+        }
+    }
+
+    async fn action_message_handler(&mut self) {
+        loop {
+            match self.msg_receiver.next().await.unwrap() {
+                ActionMessage::RequestVote(args, sender) => {}
+                ActionMessage::AppendEntries(args, sender) => {}
+            }
         }
     }
 }

@@ -1,3 +1,6 @@
+use crate::proto::raftpb::*;
+use futures::channel::oneshot::Sender;
+
 pub struct ApplyMsg {
     pub command_valid: bool,
     pub command: Vec<u8>,
@@ -33,4 +36,9 @@ impl Default for Role {
     fn default() -> Self {
         Role::Follower
     }
+}
+
+pub enum ActionMessage {
+    RequestVote(RequestVoteArgs, Sender<RequestVoteReply>),
+    AppendEntries(AppendLogsArgs, Sender<AppendLogsReply>),
 }
