@@ -21,3 +21,16 @@ impl State {
         self.is_leader
     }
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Role {
+    Follower,
+    Leader,
+    Candidate,
+}
+
+impl Default for Role {
+    fn default() -> Self {
+        Role::Follower
+    }
+}

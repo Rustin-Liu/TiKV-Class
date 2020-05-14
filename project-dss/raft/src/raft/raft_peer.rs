@@ -1,25 +1,30 @@
 use std::sync::mpsc::{sync_channel, Receiver};
-use std::sync::Arc;
 
 use futures::channel::mpsc::UnboundedSender;
 
 use crate::proto::raftpb::*;
-use crate::raft::defs::{ApplyMsg, State};
+use crate::raft::defs::{ApplyMsg, Role};
 use crate::raft::errors::{Error, Result};
 use crate::raft::persister::Persister;
+use std::sync::atomic::AtomicBool;
+use std::time::Instant;
 
 // A single Raft peer.
 pub struct RaftPeer {
     // RPC end points of all peers
-    peers: Vec<RaftClient>,
+    pub peers: Vec<RaftClient>,
     // Object to hold this peer's persisted state
-    persister: Box<dyn Persister>,
+    pub persister: Box<dyn Persister>,
     // this peer's index into peers[]
-    me: usize,
-    state: Arc<State>,
-    // Your data here (2A, 2B, 2C).
-    // Look at the paper's Figure 2 for a description of what
-    // state a Raft server must maintain.
+    pub me: usize,
+    pub term: u64,
+    pub is_leader: bool,
+    pub voted_for: Option<usize>,
+    // Peer current role.
+    pub role: Role,
+    pub last_receive_time: Instant,
+    pub dead: AtomicBool,
+    pub apply_ch: UnboundedSender<ApplyMsg>,
 }
 
 impl RaftPeer {
@@ -44,13 +49,18 @@ impl RaftPeer {
             peers,
             persister,
             me,
-            state: Arc::default(),
+            term: 0,
+            is_leader: false,
+            voted_for: None,
+            role: Default::default(),
+            last_receive_time: Instant::now(),
+            dead: Default::default(),
+            apply_ch,
         };
-
         // initialize from state persisted before a crash
         rf.restore(&raft_state);
 
-        crate::your_code_here((rf, apply_ch))
+        rf
     }
 
     /// save Raft's persistent state to stable storage,
@@ -150,7 +160,6 @@ impl RaftPeer {
         let _ = self.start(&0);
         let _ = self.send_request_vote(0, &Default::default());
         self.persist();
-        let _ = &self.state;
         let _ = &self.me;
         let _ = &self.persister;
         let _ = &self.peers;
