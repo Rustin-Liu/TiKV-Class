@@ -1,4 +1,4 @@
-use crate::raft::defs::Action;
+use crate::raft::defs::{Action, Role};
 use crate::raft::raft_peer::RaftPeer;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use rand::Rng;
@@ -54,19 +54,15 @@ impl RaftSever {
                             self.raft.convert_to_candidate();
                             let success = self.raft.kick_off_election();
                             if success {
-                                // FIXME: consider use a more readable way.
                                 self.raft.append_logs_to_peers();
-                                let sender = self.action_sender.clone();
-                                let is_leader = Arc::clone(&self.raft.is_leader);
-                                thread::spawn(|| RaftSever::append_logs_timer(sender, is_leader));
                             }
-                        }
-                        Action::StartAppendLogs => {
-                            self.raft.append_logs_to_peers();
                         }
                     },
                     None => info!("Got a none msg"),
                 }
+            }
+            if self.raft.role == Role::Leader {
+                self.raft.append_logs_to_peers();
             }
         }
     }
@@ -98,23 +94,6 @@ impl RaftSever {
                         .unwrap_or_else(|_| ());
                 }
             }
-        }
-    }
-
-    pub fn append_logs_timer(action_sender: UnboundedSender<Action>, is_leader: Arc<AtomicBool>) {
-        loop {
-            if is_leader.load(Ordering::SeqCst) {
-                if action_sender.is_closed() {
-                    action_sender
-                        .clone()
-                        .unbounded_send(Action::StartAppendLogs)
-                        .map_err(|_| ())
-                        .unwrap_or_else(|_| ());
-                }
-            } else {
-                return;
-            }
-            thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL));
         }
     }
 }
