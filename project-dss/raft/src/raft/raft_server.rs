@@ -56,7 +56,9 @@ impl RaftSever {
                                 thread::spawn(|| RaftSever::append_logs_timer(sender, is_leader));
                             }
                         }
-                        _ => {}
+                        Action::StartAppendLogs => {
+                            self.raft.append_logs_to_peers();
+                        }
                     },
                     None => info!("Got a none msg"),
                 }

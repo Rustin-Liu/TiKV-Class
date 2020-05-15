@@ -123,7 +123,7 @@ impl RaftService for Node {
         }
         Ok(receiver.await.unwrap())
     }
-    async fn append_log(&self, args: AppendLogsArgs) -> Result<AppendLogsReply> {
+    async fn append_logs(&self, args: AppendLogsArgs) -> Result<AppendLogsReply> {
         let (sender, receiver) = channel();
         if !self.msg_sender.is_closed() {
             self.msg_sender

@@ -139,6 +139,19 @@ impl RaftPeer {
         }
     }
 
+    async fn send_append_log(
+        &self,
+        server: usize,
+        args: AppendLogsArgs,
+    ) -> Result<AppendLogsReply> {
+        let peer = &self.peers[server];
+        let result = peer.append_logs(&args).await;
+        match result {
+            Ok(result) => Ok(result),
+            Err(_) => Err(Others(String::from("Request vote failed"))),
+        }
+    }
+
     pub fn request_vote_handler(&mut self, args: &RequestVoteArgs) -> RequestVoteReply {
         let mut reply = RequestVoteReply::default();
         let current_term = self.current_term.load(Ordering::SeqCst);
@@ -189,14 +202,14 @@ impl RaftPeer {
         self.peers
             .iter()
             .enumerate()
-            .filter(|(id, _)| *id != me)
-            .for_each(|(id, _)| {
+            .filter(|(peer_id, _)| *peer_id != me)
+            .for_each(|(peer_id, _)| {
                 runtime.block_on(async {
                     if !success {
-                        let reply = self.send_request_vote(id, &request_vote_args).await;
+                        let reply = self.send_request_vote(peer_id, &request_vote_args).await;
                         if let Ok(reply) = reply {
                             if reply.vote_granted {
-                                info!("{}: Got a granted from {}", self.me, id);
+                                info!("{}: Got a granted from {}", self.me, peer_id);
                                 vote_count += 1;
                                 if vote_count * 2 > peers_len {
                                     success = true;
@@ -213,7 +226,29 @@ impl RaftPeer {
         success
     }
 
-    pub fn replica_log_to_peers(&mut self) {}
+    pub fn append_logs_to_peers(&mut self) {
+        let me = self.me;
+        let peers_len = self.peers.iter().len();
+        let current_term = self.current_term.load(Ordering::SeqCst);
+        let mut runtime = Runtime::new().unwrap();
+        for peer_id in 0..peers_len {
+            if peer_id != me {
+                let append_logs_args = AppendLogsArgs {
+                    term: current_term,
+                    leader_id: me as u64,
+                };
+                runtime.block_on(async {
+                    let reply = self.send_append_log(peer_id, append_logs_args).await;
+                    if let Ok(reply) = reply {
+                        if reply.term > current_term {
+                            self.convert_to_follower(reply.term);
+                        }
+                        return;
+                    }
+                });
+            }
+        }
+    }
 }
 
 impl RaftPeer {

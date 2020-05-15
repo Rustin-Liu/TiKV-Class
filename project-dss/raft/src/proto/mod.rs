@@ -4,7 +4,7 @@ pub mod raftpb {
     labrpc::service! {
         service raft {
             rpc request_vote(RequestVoteArgs) returns (RequestVoteReply);
-            rpc append_log(AppendLogsArgs) returns (AppendLogsReply);
+            rpc append_logs(AppendLogsArgs) returns (AppendLogsReply);
         }
     }
     pub use self::raft::{
