@@ -54,10 +54,11 @@ impl RaftSever {
                             self.raft.convert_to_candidate();
                             let success = self.raft.kick_off_election();
                             if success {
+                                // FIXME: consider use a more readable way.
+                                self.raft.append_logs_to_peers();
                                 let sender = self.action_sender.clone();
                                 let is_leader = Arc::clone(&self.raft.is_leader);
                                 thread::spawn(|| RaftSever::append_logs_timer(sender, is_leader));
-                                self.raft.append_logs_to_peers();
                             }
                         }
                         Action::StartAppendLogs => {
@@ -72,6 +73,7 @@ impl RaftSever {
 
     pub fn election_timer(
         action_sender: UnboundedSender<Action>,
+        is_leader: Arc<AtomicBool>,
         dead: Arc<AtomicBool>,
         last_receive_time: Arc<Mutex<Instant>>,
     ) {
@@ -83,16 +85,18 @@ impl RaftSever {
             if dead.load(Ordering::SeqCst) {
                 return;
             }
-            let last_receive_time = last_receive_time.lock().unwrap();
-            let timeout = last_receive_time
-                .checked_duration_since(start_time)
-                .is_none();
-            if timeout && !action_sender.is_closed() {
-                action_sender
-                    .clone()
-                    .unbounded_send(Action::KickOffElection)
-                    .map_err(|_| ())
-                    .unwrap_or_else(|_| ());
+            if !is_leader.load(Ordering::SeqCst) {
+                let last_receive_time = last_receive_time.lock().unwrap();
+                let timeout = last_receive_time
+                    .checked_duration_since(start_time)
+                    .is_none();
+                if timeout && !action_sender.is_closed() {
+                    action_sender
+                        .clone()
+                        .unbounded_send(Action::KickOffElection)
+                        .map_err(|_| ())
+                        .unwrap_or_else(|_| ());
+                }
             }
         }
     }
