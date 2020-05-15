@@ -1,13 +1,12 @@
-use std::sync::mpsc::{sync_channel, Receiver};
-
-use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
+use futures::channel::mpsc::{Receiver, UnboundedSender};
 
 use crate::proto::raftpb::*;
-use crate::raft::defs::{ActionMessage, ApplyMsg, Role};
+use crate::raft::defs::{ApplyMsg, Role};
 use crate::raft::errors::{Error, Result};
 use crate::raft::persister::Persister;
-use futures::{Stream, StreamExt, TryStream};
 use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::sync_channel;
+use std::sync::Mutex;
 use std::time::Instant;
 
 // A single Raft peer.
@@ -15,7 +14,7 @@ pub struct RaftPeer {
     // RPC end points of all peers
     pub peers: Vec<RaftClient>,
     // Object to hold this peer's persisted state
-    pub persister: Box<dyn Persister>,
+    pub persister: Mutex<Box<dyn Persister>>,
     // this peer's index into peers[]
     pub me: usize,
     pub term: u64,
@@ -26,9 +25,6 @@ pub struct RaftPeer {
     pub last_receive_time: Instant,
     pub dead: AtomicBool,
     pub apply_ch: UnboundedSender<ApplyMsg>,
-
-    msg_sender: UnboundedSender<ActionMessage>,
-    msg_receiver: UnboundedReceiver<ActionMessage>,
 }
 
 impl RaftPeer {
@@ -47,10 +43,9 @@ impl RaftPeer {
         apply_ch: UnboundedSender<ApplyMsg>,
     ) -> RaftPeer {
         let raft_state = persister.raft_state();
-        let (sender, receiver) = unbounded::<ActionMessage>();
         let mut rf = RaftPeer {
             peers,
-            persister,
+            persister: Mutex::new(persister),
             me,
             term: 0,
             is_leader: false,
@@ -59,13 +54,33 @@ impl RaftPeer {
             last_receive_time: Instant::now(),
             dead: Default::default(),
             apply_ch,
-            msg_sender: sender,
-            msg_receiver: receiver,
         };
         // initialize from state persisted before a crash
         rf.restore(&raft_state);
 
         rf
+    }
+
+    pub fn convert_to_candidate(&mut self) {
+        self.role = Role::Candidate;
+        self.term += 1;
+        self.voted_for = Some(self.me);
+        self.is_leader = false;
+        self.last_receive_time = Instant::now();
+    }
+
+    pub fn convert_to_follower(&mut self, new_term: u64) {
+        self.role = Role::Follower;
+        self.term = new_term;
+        self.voted_for = None;
+        self.is_leader = false;
+        self.last_receive_time = Instant::now();
+    }
+
+    pub fn convert_to_leader(&mut self) {
+        self.role = Role::Leader;
+        self.is_leader = true;
+        self.last_receive_time = Instant::now();
     }
 
     /// save Raft's persistent state to stable storage,
@@ -139,6 +154,42 @@ impl RaftPeer {
         crate::your_code_here((server, args, tx, rx))
     }
 
+    pub fn request_vote_handler(&mut self, args: RequestVoteArgs) -> RequestVoteReply {
+        let mut reply = RequestVoteReply::default();
+        reply.term = self.term;
+        if args.term < self.term {
+            reply.vote_granted = false;
+        } else {
+            if args.term > self.term {
+                self.convert_to_follower(args.term);
+            }
+            if self.voted_for.is_none() {
+                self.voted_for = Some(args.candidate_id as usize);
+                self.last_receive_time = Instant::now();
+                reply.vote_granted = true;
+            }
+        }
+        reply
+    }
+
+    pub fn append_logs_handler(&mut self, args: AppendLogsArgs) -> AppendLogsReply {
+        if args.term < self.term {
+            return AppendLogsReply {
+                term: self.term,
+                success: false,
+            };
+        }
+        self.last_receive_time = Instant::now();
+
+        if args.term > self.term {
+            self.convert_to_follower(args.term)
+        }
+        AppendLogsReply {
+            term: self.term,
+            success: true,
+        }
+    }
+
     fn start<M>(&self, command: &M) -> Result<(u64, u64)>
     where
         M: labcodec::Message,
@@ -154,15 +205,6 @@ impl RaftPeer {
             Ok((index, term))
         } else {
             Err(Error::NotLeader)
-        }
-    }
-
-    async fn action_message_handler(&mut self) {
-        loop {
-            match self.msg_receiver.next().await.unwrap() {
-                ActionMessage::RequestVote(args, sender) => {}
-                ActionMessage::AppendEntries(args, sender) => {}
-            }
         }
     }
 }

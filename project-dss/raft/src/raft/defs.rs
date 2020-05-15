@@ -40,5 +40,5 @@ impl Default for Role {
 
 pub enum ActionMessage {
     RequestVote(RequestVoteArgs, Sender<RequestVoteReply>),
-    AppendEntries(AppendLogsArgs, Sender<AppendLogsReply>),
+    AppendLogs(AppendLogsArgs, Sender<AppendLogsReply>),
 }

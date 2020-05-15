@@ -1,8 +1,12 @@
 use labrpc::Result;
 
 use crate::proto::raftpb::*;
-use crate::raft::defs::State;
+use crate::raft::defs::{ActionMessage, State};
 use crate::raft::raft_peer::RaftPeer;
+use crate::raft::raft_server::RaftSever;
+use futures::channel::mpsc::{unbounded, UnboundedSender};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 // Choose concurrency paradigm.
 //
@@ -20,14 +24,21 @@ use crate::raft::raft_peer::RaftPeer;
 // ```
 #[derive(Clone)]
 pub struct Node {
-    // Your code here.
+    msg_sender: UnboundedSender<ActionMessage>,
 }
 
 impl Node {
     /// Create a new raft service.
     pub fn new(raft: RaftPeer) -> Node {
-        // Your code here.
-        crate::your_code_here(raft)
+        let (sender, receiver) = unbounded::<ActionMessage>();
+        let msg_sender = sender.clone();
+        let mut server = RaftSever {
+            raft,
+            msg_sender: sender,
+            msg_receiver: Arc::new(Mutex::new(receiver)),
+        };
+        thread::spawn(move || server.action_handler());
+        Node { msg_sender }
     }
 
     /// the service using Raft (e.g. a k/v server) wants to start
