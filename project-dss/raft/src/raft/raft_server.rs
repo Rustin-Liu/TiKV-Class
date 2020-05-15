@@ -36,7 +36,10 @@ impl RaftSever {
                             })
                         }
                         Action::AppendLogs(args, sender) => {
-                            info!("{}: Got a append logs", self.raft.me);
+                            info!(
+                                "{}: Got a append logs from {}",
+                                self.raft.me, args.leader_id
+                            );
                             let reply = self.raft.append_logs_handler(&args);
                             if reply.success {
                                 let mut last_update_time = self.last_receive_time.lock().unwrap();
@@ -54,6 +57,7 @@ impl RaftSever {
                                 let sender = self.action_sender.clone();
                                 let is_leader = Arc::clone(&self.raft.is_leader);
                                 thread::spawn(|| RaftSever::append_logs_timer(sender, is_leader));
+                                self.raft.append_logs_to_peers();
                             }
                         }
                         Action::StartAppendLogs => {
@@ -74,7 +78,7 @@ impl RaftSever {
         let mut rng = rand::thread_rng();
         loop {
             let start_time = Instant::now();
-            let election_timeout = rng.gen_range(0, 500);
+            let election_timeout = rng.gen_range(0, 300);
             thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL + election_timeout));
             if dead.load(Ordering::SeqCst) {
                 return;
@@ -96,7 +100,6 @@ impl RaftSever {
     pub fn append_logs_timer(action_sender: UnboundedSender<Action>, is_leader: Arc<AtomicBool>) {
         loop {
             if is_leader.load(Ordering::SeqCst) {
-                thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL));
                 if action_sender.is_closed() {
                     action_sender
                         .clone()
@@ -107,6 +110,7 @@ impl RaftSever {
             } else {
                 return;
             }
+            thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL));
         }
     }
 }

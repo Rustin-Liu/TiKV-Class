@@ -30,6 +30,7 @@ pub struct Node {
     msg_sender: UnboundedSender<Action>,
     current_term: Arc<AtomicU64>,
     is_leader: Arc<AtomicBool>,
+    dead: Arc<AtomicBool>,
 }
 
 impl Node {
@@ -41,7 +42,8 @@ impl Node {
         let last_receive_time = Arc::new(Mutex::new(Instant::now()));
         let current_term = Arc::clone(&raft.current_term);
         let is_leader = Arc::clone(&raft.is_leader);
-        let dead = Arc::clone(&raft.dead);
+        let dead_for_server = Arc::clone(&raft.dead);
+        let dead_for_node = Arc::clone(&raft.dead);
         let mut server = RaftSever {
             raft,
             action_sender: sender,
@@ -49,11 +51,14 @@ impl Node {
             last_receive_time: Arc::clone(&last_receive_time),
         };
         thread::spawn(move || server.action_handler());
-        thread::spawn(|| RaftSever::election_timer(election_timer_sender, dead, last_receive_time));
+        thread::spawn(|| {
+            RaftSever::election_timer(election_timer_sender, dead_for_server, last_receive_time)
+        });
         Node {
             msg_sender: node_sender,
             current_term,
             is_leader,
+            dead: dead_for_node,
         }
     }
 
@@ -106,7 +111,7 @@ impl Node {
     /// a VIRTUAL crash in tester, so take care of background
     /// threads you generated with this Raft Node.
     pub fn kill(&self) {
-        // Your code here, if desired.
+        self.dead.store(true, Ordering::SeqCst);
     }
 }
 

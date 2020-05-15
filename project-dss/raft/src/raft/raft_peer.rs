@@ -7,7 +7,11 @@ use crate::raft::errors::{Error, Result};
 use crate::raft::persister::Persister;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::runtime::Runtime;
+use tokio::time::timeout;
+
+const PRC_TIMEOUT: u64 = 50;
 
 // A single Raft peer.
 pub struct RaftPeer {
@@ -132,10 +136,14 @@ impl RaftPeer {
         args: &RequestVoteArgs,
     ) -> Result<RequestVoteReply> {
         let peer = &self.peers[server];
-        let result = peer.request_vote(args).await;
+        info!("{}: send request vote to {}", self.me, server);
+        let result = timeout(Duration::from_millis(PRC_TIMEOUT), peer.request_vote(args)).await;
         match result {
-            Ok(result) => Ok(result),
-            Err(_) => Err(Others(String::from("Request vote failed"))),
+            Ok(result) => match result {
+                Ok(result) => Ok(result),
+                Err(_) => Err(Others(String::from("Request vote failed"))),
+            },
+            Err(_) => Err(Others(String::from("Request vote timeout"))),
         }
     }
 
@@ -145,10 +153,13 @@ impl RaftPeer {
         args: AppendLogsArgs,
     ) -> Result<AppendLogsReply> {
         let peer = &self.peers[server];
-        let result = peer.append_logs(&args).await;
+        let result = timeout(Duration::from_millis(PRC_TIMEOUT), peer.append_logs(&args)).await;
         match result {
-            Ok(result) => Ok(result),
-            Err(_) => Err(Others(String::from("Request vote failed"))),
+            Ok(result) => match result {
+                Ok(result) => Ok(result),
+                Err(_) => Err(Others(String::from("Append logs failed"))),
+            },
+            Err(_) => Err(Others(String::from("Append logs timeout"))),
         }
     }
 
@@ -198,7 +209,6 @@ impl RaftPeer {
         let peers_len = self.peers.len();
         let mut success = false;
         let mut runtime = Runtime::new().unwrap();
-        // FIXME: maybe have better way.
         self.peers
             .iter()
             .enumerate()
@@ -213,7 +223,6 @@ impl RaftPeer {
                                 vote_count += 1;
                                 if vote_count * 2 > peers_len {
                                     success = true;
-                                    info!("{}: became leader on {}", self.me, current_term);
                                 }
                             }
                         }
@@ -222,6 +231,7 @@ impl RaftPeer {
             });
         if success {
             self.convert_to_leader();
+            info!("{}: became leader on {}", self.me, current_term);
         }
         success
     }
