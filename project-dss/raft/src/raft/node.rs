@@ -1,7 +1,7 @@
 use labrpc::Result;
 
 use crate::proto::raftpb::*;
-use crate::raft::defs::{ActionMessage, State};
+use crate::raft::defs::{Action, State};
 use crate::raft::raft_peer::RaftPeer;
 use crate::raft::raft_server::RaftSever;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
@@ -25,18 +25,18 @@ use std::thread;
 // ```
 #[derive(Clone)]
 pub struct Node {
-    msg_sender: UnboundedSender<ActionMessage>,
+    msg_sender: UnboundedSender<Action>,
 }
 
 impl Node {
     /// Create a new raft service.
     pub fn new(raft: RaftPeer) -> Node {
-        let (sender, receiver) = unbounded::<ActionMessage>();
+        let (sender, receiver) = unbounded::<Action>();
         let msg_sender = sender.clone();
         let mut server = RaftSever {
             raft,
-            msg_sender: sender,
-            msg_receiver: Arc::new(Mutex::new(receiver)),
+            action_sender: sender,
+            action_receiver: Arc::new(Mutex::new(receiver)),
         };
         thread::spawn(move || server.action_handler());
         Node { msg_sender }
@@ -108,7 +108,7 @@ impl RaftService for Node {
         if !self.msg_sender.is_closed() {
             self.msg_sender
                 .clone()
-                .unbounded_send(ActionMessage::RequestVote(args, sender))
+                .unbounded_send(Action::RequestVote(args, sender))
                 .map_err(|_| ())
                 .unwrap_or_else(|_| ());
         }
@@ -119,7 +119,7 @@ impl RaftService for Node {
         if !self.msg_sender.is_closed() {
             self.msg_sender
                 .clone()
-                .unbounded_send(ActionMessage::AppendLogs(args, sender))
+                .unbounded_send(Action::AppendLogs(args, sender))
                 .map_err(|_| ())
                 .unwrap_or_else(|_| ());
         }
