@@ -8,6 +8,7 @@ use futures::channel::mpsc::{unbounded, UnboundedSender};
 use futures::channel::oneshot::channel;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Instant;
 
 // Choose concurrency paradigm.
 //
@@ -32,14 +33,21 @@ impl Node {
     /// Create a new raft service.
     pub fn new(raft: RaftPeer) -> Node {
         let (sender, receiver) = unbounded::<Action>();
-        let msg_sender = sender.clone();
+        let node_sender = sender.clone();
+        let election_timer_sender = sender.clone();
+        let last_receive_time = Arc::new(Mutex::new(Instant::now()));
+        let dead = Arc::clone(&raft.dead);
         let mut server = RaftSever {
             raft,
             action_sender: sender,
             action_receiver: Arc::new(Mutex::new(receiver)),
+            last_receive_time: Arc::clone(&last_receive_time),
         };
         thread::spawn(move || server.action_handler());
-        Node { msg_sender }
+        thread::spawn(|| RaftSever::election_timer(election_timer_sender, dead, last_receive_time));
+        Node {
+            msg_sender: node_sender,
+        }
     }
 
     /// the service using Raft (e.g. a k/v server) wants to start
