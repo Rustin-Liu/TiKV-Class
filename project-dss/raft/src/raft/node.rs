@@ -5,6 +5,7 @@ use crate::raft::defs::{ActionMessage, State};
 use crate::raft::raft_peer::RaftPeer;
 use crate::raft::raft_server::RaftSever;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
+use futures::channel::oneshot::channel;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -102,11 +103,26 @@ impl Node {
 
 #[async_trait::async_trait]
 impl RaftService for Node {
-    // example RequestVote RPC handler.
-    //
-    // CAVEATS: Please avoid locking or sleeping here, it may jam the network.
     async fn request_vote(&self, args: RequestVoteArgs) -> Result<RequestVoteReply> {
-        // Your code here (2A, 2B).
-        crate::your_code_here(args)
+        let (sender, receiver) = channel();
+        if !self.msg_sender.is_closed() {
+            self.msg_sender
+                .clone()
+                .unbounded_send(ActionMessage::RequestVote(args, sender))
+                .map_err(|_| ())
+                .unwrap_or_else(|_| ());
+        }
+        Ok(receiver.await.unwrap())
+    }
+    async fn append_log(&self, args: AppendLogsArgs) -> Result<AppendLogsReply> {
+        let (sender, receiver) = channel();
+        if !self.msg_sender.is_closed() {
+            self.msg_sender
+                .clone()
+                .unbounded_send(ActionMessage::AppendLogs(args, sender))
+                .map_err(|_| ())
+                .unwrap_or_else(|_| ());
+        }
+        Ok(receiver.await.unwrap())
     }
 }

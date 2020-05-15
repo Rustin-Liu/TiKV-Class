@@ -1,11 +1,10 @@
-use futures::channel::mpsc::{Receiver, UnboundedSender};
+use futures::channel::mpsc::UnboundedSender;
 
 use crate::proto::raftpb::*;
 use crate::raft::defs::{ApplyMsg, Role};
 use crate::raft::errors::{Error, Result};
 use crate::raft::persister::Persister;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::sync_channel;
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -130,28 +129,14 @@ impl RaftPeer {
     /// is no need to implement your own timeouts around this method.
     ///
     /// look at the comments in ../labrpc/src/lib.rs for more details.
-    fn send_request_vote(
+    async fn send_request_vote(
         &self,
         server: usize,
         args: &RequestVoteArgs,
-    ) -> Receiver<Result<RequestVoteReply>> {
-        // Your code here if you want the rpc becomes async.
-        // Example:
-        // ```
-        // let peer = &self.peers[server];
-        // let (tx, rx) = channel();
-        // peer.spawn(
-        //     peer.request_vote(&args)
-        //         .map_err(Error::Rpc)
-        //         .then(move |res| {
-        //             tx.send(res);
-        //             Ok(())
-        //         }),
-        // );
-        // rx
-        // ```
-        let (tx, rx) = sync_channel::<Result<RequestVoteReply>>(1);
-        crate::your_code_here((server, args, tx, rx))
+    ) -> Result<RequestVoteReply> {
+        let peer = &self.peers[server];
+        let result = peer.request_vote(args).await;
+        Ok(result.unwrap())
     }
 
     pub fn request_vote_handler(&mut self, args: RequestVoteArgs) -> RequestVoteReply {
