@@ -6,6 +6,7 @@ pub enum Error {
     Decode(labcodec::DecodeError),
     Rpc(labrpc::Error),
     NotLeader,
+    Others(String),
 }
 
 impl fmt::Display for Error {

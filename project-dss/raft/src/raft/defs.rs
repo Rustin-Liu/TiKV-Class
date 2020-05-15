@@ -1,3 +1,6 @@
+use crate::proto::raftpb::*;
+use futures::channel::oneshot::Sender;
+
 pub struct ApplyMsg {
     pub command_valid: bool,
     pub command: Vec<u8>,
@@ -20,4 +23,24 @@ impl State {
     pub fn is_leader(&self) -> bool {
         self.is_leader
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Role {
+    Follower,
+    Leader,
+    Candidate,
+}
+
+impl Default for Role {
+    fn default() -> Self {
+        Role::Follower
+    }
+}
+
+pub enum Action {
+    RequestVote(RequestVoteArgs, Sender<RequestVoteReply>),
+    AppendLogs(AppendLogsArgs, Sender<AppendLogsReply>),
+    KickOffElection,
+    StartAppendLogs,
 }

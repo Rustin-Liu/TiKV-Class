@@ -1,8 +1,15 @@
 use labrpc::Result;
 
 use crate::proto::raftpb::*;
-use crate::raft::defs::State;
+use crate::raft::defs::{Action, State};
 use crate::raft::raft_peer::RaftPeer;
+use crate::raft::raft_server::RaftSever;
+use futures::channel::mpsc::{unbounded, UnboundedSender};
+use futures::channel::oneshot::channel;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Instant;
 
 // Choose concurrency paradigm.
 //
@@ -20,14 +27,45 @@ use crate::raft::raft_peer::RaftPeer;
 // ```
 #[derive(Clone)]
 pub struct Node {
-    // Your code here.
+    msg_sender: UnboundedSender<Action>,
+    current_term: Arc<AtomicU64>,
+    is_leader: Arc<AtomicBool>,
+    dead: Arc<AtomicBool>,
 }
 
 impl Node {
     /// Create a new raft service.
     pub fn new(raft: RaftPeer) -> Node {
-        // Your code here.
-        crate::your_code_here(raft)
+        let (sender, receiver) = unbounded::<Action>();
+        let node_sender = sender.clone();
+        let election_timer_sender = sender.clone();
+        let last_receive_time = Arc::new(Mutex::new(Instant::now()));
+        let current_term = Arc::clone(&raft.current_term);
+        let is_leader_for_server = Arc::clone(&raft.is_leader);
+        let is_leader_for_node = Arc::clone(&raft.is_leader);
+        let dead_for_server = Arc::clone(&raft.dead);
+        let dead_for_node = Arc::clone(&raft.dead);
+        let mut server = RaftSever {
+            raft,
+            action_sender: sender,
+            action_receiver: Arc::new(Mutex::new(receiver)),
+            last_receive_time: Arc::clone(&last_receive_time),
+        };
+        thread::spawn(move || server.action_handler());
+        thread::spawn(|| {
+            RaftSever::election_timer(
+                election_timer_sender,
+                is_leader_for_server,
+                dead_for_server,
+                last_receive_time,
+            )
+        });
+        Node {
+            msg_sender: node_sender,
+            current_term,
+            is_leader: is_leader_for_node,
+            dead: dead_for_node,
+        }
     }
 
     /// the service using Raft (e.g. a k/v server) wants to start
@@ -54,18 +92,12 @@ impl Node {
 
     /// The current term of this peer.
     pub fn term(&self) -> u64 {
-        // Your code here.
-        // Example:
-        // self.raft.term
-        crate::your_code_here(())
+        self.current_term.load(Ordering::SeqCst)
     }
 
     /// Whether this peer believes it is the leader.
     pub fn is_leader(&self) -> bool {
-        // Your code here.
-        // Example:
-        // self.raft.leader_id == self.id
-        crate::your_code_here(())
+        self.is_leader.load(Ordering::SeqCst)
     }
 
     /// The current state of this peer.
@@ -85,17 +117,32 @@ impl Node {
     /// a VIRTUAL crash in tester, so take care of background
     /// threads you generated with this Raft Node.
     pub fn kill(&self) {
-        // Your code here, if desired.
+        self.dead.store(true, Ordering::SeqCst);
     }
 }
 
 #[async_trait::async_trait]
 impl RaftService for Node {
-    // example RequestVote RPC handler.
-    //
-    // CAVEATS: Please avoid locking or sleeping here, it may jam the network.
     async fn request_vote(&self, args: RequestVoteArgs) -> Result<RequestVoteReply> {
-        // Your code here (2A, 2B).
-        crate::your_code_here(args)
+        let (sender, receiver) = channel();
+        if !self.msg_sender.is_closed() {
+            self.msg_sender
+                .clone()
+                .unbounded_send(Action::RequestVote(args, sender))
+                .map_err(|_| ())
+                .unwrap_or_else(|_| ());
+        }
+        Ok(receiver.await.unwrap())
+    }
+    async fn append_logs(&self, args: AppendLogsArgs) -> Result<AppendLogsReply> {
+        let (sender, receiver) = channel();
+        if !self.msg_sender.is_closed() {
+            self.msg_sender
+                .clone()
+                .unbounded_send(Action::AppendLogs(args, sender))
+                .map_err(|_| ())
+                .unwrap_or_else(|_| ());
+        }
+        Ok(receiver.await.unwrap())
     }
 }

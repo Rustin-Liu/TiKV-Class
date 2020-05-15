@@ -1,25 +1,33 @@
-use std::sync::mpsc::{sync_channel, Receiver};
-use std::sync::Arc;
-
 use futures::channel::mpsc::UnboundedSender;
 
 use crate::proto::raftpb::*;
-use crate::raft::defs::{ApplyMsg, State};
+use crate::raft::defs::{ApplyMsg, Role};
+use crate::raft::errors::Error::Others;
 use crate::raft::errors::{Error, Result};
 use crate::raft::persister::Persister;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::runtime::Runtime;
+use tokio::time::timeout;
+
+const PRC_TIMEOUT: u64 = 50;
 
 // A single Raft peer.
 pub struct RaftPeer {
     // RPC end points of all peers
-    peers: Vec<RaftClient>,
+    pub peers: Vec<RaftClient>,
     // Object to hold this peer's persisted state
-    persister: Box<dyn Persister>,
+    pub persister: Mutex<Box<dyn Persister>>,
     // this peer's index into peers[]
-    me: usize,
-    state: Arc<State>,
-    // Your data here (2A, 2B, 2C).
-    // Look at the paper's Figure 2 for a description of what
-    // state a Raft server must maintain.
+    pub me: usize,
+    pub current_term: Arc<AtomicU64>,
+    pub is_leader: Arc<AtomicBool>,
+    pub voted_for: Option<usize>,
+    // Peer current role.
+    pub role: Role,
+    pub dead: Arc<AtomicBool>,
+    pub apply_ch: UnboundedSender<ApplyMsg>,
 }
 
 impl RaftPeer {
@@ -38,19 +46,40 @@ impl RaftPeer {
         apply_ch: UnboundedSender<ApplyMsg>,
     ) -> RaftPeer {
         let raft_state = persister.raft_state();
-
-        // Your initialization code here (2A, 2B, 2C).
         let mut rf = RaftPeer {
             peers,
-            persister,
+            persister: Mutex::new(persister),
             me,
-            state: Arc::default(),
+            current_term: Arc::new(AtomicU64::new(0)),
+            is_leader: Arc::new(AtomicBool::new(false)),
+            voted_for: None,
+            role: Default::default(),
+            dead: Arc::new(Default::default()),
+            apply_ch,
         };
-
         // initialize from state persisted before a crash
         rf.restore(&raft_state);
 
-        crate::your_code_here((rf, apply_ch))
+        rf
+    }
+
+    pub fn convert_to_candidate(&mut self) {
+        self.role = Role::Candidate;
+        self.current_term.fetch_add(1, Ordering::SeqCst);
+        self.voted_for = Some(self.me);
+        self.is_leader.store(false, Ordering::SeqCst);
+    }
+
+    pub fn convert_to_follower(&mut self, new_term: u64) {
+        self.role = Role::Follower;
+        self.current_term.store(new_term, Ordering::SeqCst);
+        self.voted_for = None;
+        self.is_leader.store(false, Ordering::SeqCst);
+    }
+
+    pub fn convert_to_leader(&mut self) {
+        self.role = Role::Leader;
+        self.is_leader.store(true, Ordering::SeqCst);
     }
 
     /// save Raft's persistent state to stable storage,
@@ -83,47 +112,6 @@ impl RaftPeer {
         // }
     }
 
-    /// example code to send a RequestVote RPC to a server.
-    /// server is the index of the target server in peers.
-    /// expects RPC arguments in args.
-    ///
-    /// The labrpc package simulates a lossy network, in which servers
-    /// may be unreachable, and in which requests and replies may be lost.
-    /// This method sends a request and waits for a reply. If a reply arrives
-    /// within a timeout interval, This method returns Ok(_); otherwise
-    /// this method returns Err(_). Thus this method may not return for a while.
-    /// An Err(_) return can be caused by a dead server, a live server that
-    /// can't be reached, a lost request, or a lost reply.
-    ///
-    /// This method is guaranteed to return (perhaps after a delay) *except* if
-    /// the handler function on the server side does not return.  Thus there
-    /// is no need to implement your own timeouts around this method.
-    ///
-    /// look at the comments in ../labrpc/src/lib.rs for more details.
-    fn send_request_vote(
-        &self,
-        server: usize,
-        args: &RequestVoteArgs,
-    ) -> Receiver<Result<RequestVoteReply>> {
-        // Your code here if you want the rpc becomes async.
-        // Example:
-        // ```
-        // let peer = &self.peers[server];
-        // let (tx, rx) = channel();
-        // peer.spawn(
-        //     peer.request_vote(&args)
-        //         .map_err(Error::Rpc)
-        //         .then(move |res| {
-        //             tx.send(res);
-        //             Ok(())
-        //         }),
-        // );
-        // rx
-        // ```
-        let (tx, rx) = sync_channel::<Result<RequestVoteReply>>(1);
-        crate::your_code_here((server, args, tx, rx))
-    }
-
     fn start<M>(&self, command: &M) -> Result<(u64, u64)>
     where
         M: labcodec::Message,
@@ -141,6 +129,136 @@ impl RaftPeer {
             Err(Error::NotLeader)
         }
     }
+
+    async fn send_request_vote(
+        &self,
+        server: usize,
+        args: &RequestVoteArgs,
+    ) -> Result<RequestVoteReply> {
+        let peer = &self.peers[server];
+        info!("{}: send request vote to {}", self.me, server);
+        let result = timeout(Duration::from_millis(PRC_TIMEOUT), peer.request_vote(args)).await;
+        match result {
+            Ok(result) => match result {
+                Ok(result) => Ok(result),
+                Err(_) => Err(Others(String::from("Request vote failed"))),
+            },
+            Err(_) => Err(Others(String::from("Request vote timeout"))),
+        }
+    }
+
+    async fn send_append_log(
+        &self,
+        server: usize,
+        args: AppendLogsArgs,
+    ) -> Result<AppendLogsReply> {
+        let peer = &self.peers[server];
+        let result = timeout(Duration::from_millis(PRC_TIMEOUT), peer.append_logs(&args)).await;
+        match result {
+            Ok(result) => match result {
+                Ok(result) => Ok(result),
+                Err(_) => Err(Others(String::from("Append logs failed"))),
+            },
+            Err(_) => Err(Others(String::from("Append logs timeout"))),
+        }
+    }
+
+    pub fn request_vote_handler(&mut self, args: &RequestVoteArgs) -> RequestVoteReply {
+        let mut reply = RequestVoteReply::default();
+        let current_term = self.current_term.load(Ordering::SeqCst);
+        reply.term = current_term;
+        if args.term < current_term {
+            reply.vote_granted = false;
+        } else {
+            if args.term > current_term {
+                self.convert_to_follower(args.term);
+            }
+            if self.voted_for.is_none() {
+                self.voted_for = Some(args.candidate_id as usize);
+                reply.vote_granted = true;
+            }
+        }
+        reply
+    }
+
+    pub fn append_logs_handler(&mut self, args: &AppendLogsArgs) -> AppendLogsReply {
+        let current_term = self.current_term.load(Ordering::SeqCst);
+        if args.term < current_term {
+            return AppendLogsReply {
+                term: current_term,
+                success: false,
+            };
+        }
+        if args.term > current_term {
+            self.convert_to_follower(args.term)
+        }
+        AppendLogsReply {
+            term: current_term,
+            success: true,
+        }
+    }
+
+    pub fn kick_off_election(&mut self) -> bool {
+        let me = self.me;
+        let current_term = self.current_term.load(Ordering::SeqCst);
+        let request_vote_args = RequestVoteArgs {
+            term: current_term,
+            candidate_id: me as u64,
+        };
+        let mut vote_count = 1 as usize;
+        let peers_len = self.peers.len();
+        let mut success = false;
+        let mut runtime = Runtime::new().unwrap();
+        self.peers
+            .iter()
+            .enumerate()
+            .filter(|(peer_id, _)| *peer_id != me)
+            .for_each(|(peer_id, _)| {
+                runtime.block_on(async {
+                    if !success {
+                        let reply = self.send_request_vote(peer_id, &request_vote_args).await;
+                        if let Ok(reply) = reply {
+                            if reply.vote_granted {
+                                info!("{}: Got a granted from {}", self.me, peer_id);
+                                vote_count += 1;
+                                if vote_count * 2 > peers_len {
+                                    success = true;
+                                }
+                            }
+                        }
+                    }
+                })
+            });
+        if success {
+            self.convert_to_leader();
+            info!("{}: became leader on {}", self.me, current_term);
+        }
+        success
+    }
+
+    pub fn append_logs_to_peers(&mut self) {
+        let me = self.me;
+        let peers_len = self.peers.iter().len();
+        let current_term = self.current_term.load(Ordering::SeqCst);
+        let mut runtime = Runtime::new().unwrap();
+        for peer_id in 0..peers_len {
+            if peer_id != me {
+                let append_logs_args = AppendLogsArgs {
+                    term: current_term,
+                    leader_id: me as u64,
+                };
+                runtime.block_on(async {
+                    let reply = self.send_append_log(peer_id, append_logs_args).await;
+                    if let Ok(reply) = reply {
+                        if reply.term > current_term {
+                            self.convert_to_follower(reply.term);
+                        }
+                        return;
+                    }
+                });
+            }
+        }
+    }
 }
 
 impl RaftPeer {
@@ -150,7 +268,6 @@ impl RaftPeer {
         let _ = self.start(&0);
         let _ = self.send_request_vote(0, &Default::default());
         self.persist();
-        let _ = &self.state;
         let _ = &self.me;
         let _ = &self.persister;
         let _ = &self.peers;
