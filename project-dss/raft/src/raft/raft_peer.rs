@@ -5,7 +5,7 @@ use crate::raft::defs::{ApplyMsg, Role};
 use crate::raft::errors::Error::Others;
 use crate::raft::errors::{Error, Result};
 use crate::raft::persister::Persister;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 
@@ -17,8 +17,8 @@ pub struct RaftPeer {
     pub persister: Mutex<Box<dyn Persister>>,
     // this peer's index into peers[]
     pub me: usize,
-    pub term: u64,
-    pub is_leader: bool,
+    pub current_term: Arc<AtomicU64>,
+    pub is_leader: Arc<AtomicBool>,
     pub voted_for: Option<usize>,
     // Peer current role.
     pub role: Role,
@@ -46,8 +46,8 @@ impl RaftPeer {
             peers,
             persister: Mutex::new(persister),
             me,
-            term: 0,
-            is_leader: false,
+            current_term: Arc::new(AtomicU64::new(0)),
+            is_leader: Arc::new(AtomicBool::new(false)),
             voted_for: None,
             role: Default::default(),
             dead: Arc::new(Default::default()),
@@ -61,21 +61,21 @@ impl RaftPeer {
 
     pub fn convert_to_candidate(&mut self) {
         self.role = Role::Candidate;
-        self.term += 1;
+        self.current_term.fetch_add(1, Ordering::SeqCst);
         self.voted_for = Some(self.me);
-        self.is_leader = false;
+        self.is_leader.store(false, Ordering::SeqCst);
     }
 
     pub fn convert_to_follower(&mut self, new_term: u64) {
         self.role = Role::Follower;
-        self.term = new_term;
+        self.current_term.store(new_term, Ordering::SeqCst);
         self.voted_for = None;
-        self.is_leader = false;
+        self.is_leader.store(false, Ordering::SeqCst);
     }
 
     pub fn convert_to_leader(&mut self) {
         self.role = Role::Leader;
-        self.is_leader = true;
+        self.is_leader.store(true, Ordering::SeqCst);
     }
 
     /// save Raft's persistent state to stable storage,
@@ -139,13 +139,14 @@ impl RaftPeer {
         }
     }
 
-    pub fn request_vote_handler(&mut self, args: RequestVoteArgs) -> RequestVoteReply {
+    pub fn request_vote_handler(&mut self, args: &RequestVoteArgs) -> RequestVoteReply {
         let mut reply = RequestVoteReply::default();
-        reply.term = self.term;
-        if args.term < self.term {
+        let current_term = self.current_term.load(Ordering::SeqCst);
+        reply.term = current_term;
+        if args.term < current_term {
             reply.vote_granted = false;
         } else {
-            if args.term > self.term {
+            if args.term > current_term {
                 self.convert_to_follower(args.term);
             }
             if self.voted_for.is_none() {
@@ -156,31 +157,35 @@ impl RaftPeer {
         reply
     }
 
-    pub fn append_logs_handler(&mut self, args: AppendLogsArgs) -> AppendLogsReply {
-        if args.term < self.term {
+    pub fn append_logs_handler(&mut self, args: &AppendLogsArgs) -> AppendLogsReply {
+        let current_term = self.current_term.load(Ordering::SeqCst);
+        if args.term < current_term {
             return AppendLogsReply {
-                term: self.term,
+                term: current_term,
                 success: false,
             };
         }
-        if args.term > self.term {
+        if args.term > current_term {
             self.convert_to_follower(args.term)
         }
         AppendLogsReply {
-            term: self.term,
+            term: current_term,
             success: true,
         }
     }
-    pub fn kick_off_election(&self) -> bool {
+
+    pub fn kick_off_election(&mut self) -> bool {
         let me = self.me;
+        let current_term = self.current_term.load(Ordering::SeqCst);
         let request_vote_args = RequestVoteArgs {
-            term: self.term,
+            term: current_term,
             candidate_id: me as u64,
         };
         let mut vote_count = 1 as usize;
         let peers_len = self.peers.len();
         let mut success = false;
         let mut runtime = Runtime::new().unwrap();
+        // FIXME: maybe have better way.
         self.peers
             .iter()
             .enumerate()
@@ -191,17 +196,24 @@ impl RaftPeer {
                         let reply = self.send_request_vote(id, &request_vote_args).await;
                         if let Ok(reply) = reply {
                             if reply.vote_granted {
+                                info!("{}: Got a granted from {}", self.me, id);
                                 vote_count += 1;
                                 if vote_count * 2 > peers_len {
                                     success = true;
+                                    info!("{}: became leader on {}", self.me, current_term);
                                 }
                             }
                         }
                     }
                 })
             });
+        if success {
+            self.convert_to_leader();
+        }
         success
     }
+
+    pub fn replica_log_to_peers(&mut self) {}
 }
 
 impl RaftPeer {

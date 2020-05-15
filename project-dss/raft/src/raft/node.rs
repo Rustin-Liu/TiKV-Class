@@ -6,6 +6,7 @@ use crate::raft::raft_peer::RaftPeer;
 use crate::raft::raft_server::RaftSever;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
 use futures::channel::oneshot::channel;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
@@ -27,6 +28,8 @@ use std::time::Instant;
 #[derive(Clone)]
 pub struct Node {
     msg_sender: UnboundedSender<Action>,
+    current_term: Arc<AtomicU64>,
+    is_leader: Arc<AtomicBool>,
 }
 
 impl Node {
@@ -36,6 +39,8 @@ impl Node {
         let node_sender = sender.clone();
         let election_timer_sender = sender.clone();
         let last_receive_time = Arc::new(Mutex::new(Instant::now()));
+        let current_term = Arc::clone(&raft.current_term);
+        let is_leader = Arc::clone(&raft.is_leader);
         let dead = Arc::clone(&raft.dead);
         let mut server = RaftSever {
             raft,
@@ -47,6 +52,8 @@ impl Node {
         thread::spawn(|| RaftSever::election_timer(election_timer_sender, dead, last_receive_time));
         Node {
             msg_sender: node_sender,
+            current_term,
+            is_leader,
         }
     }
 
@@ -74,18 +81,12 @@ impl Node {
 
     /// The current term of this peer.
     pub fn term(&self) -> u64 {
-        // Your code here.
-        // Example:
-        // self.raft.term
-        crate::your_code_here(())
+        self.current_term.load(Ordering::SeqCst)
     }
 
     /// Whether this peer believes it is the leader.
     pub fn is_leader(&self) -> bool {
-        // Your code here.
-        // Example:
-        // self.raft.leader_id == self.id
-        crate::your_code_here(())
+        self.is_leader.load(Ordering::SeqCst)
     }
 
     /// The current state of this peer.

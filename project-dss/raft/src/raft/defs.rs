@@ -43,5 +43,4 @@ pub enum Action {
     AppendLogs(AppendLogsArgs, Sender<AppendLogsReply>),
     KickOffElection,
     StartAppendLogs,
-    ElectionSuccess,
 }
