@@ -1,4 +1,4 @@
-use crate::raft::defs::{Action, Role};
+use crate::raft::defs::Action;
 use crate::raft::raft_peer::RaftPeer;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use rand::Rng;
@@ -75,7 +75,7 @@ impl RaftSever {
                     None => info!("Got a none msg"),
                 }
             }
-            if self.raft.role == Role::Leader {
+            if self.raft.is_leader.load(Ordering::SeqCst) {
                 self.raft.append_logs_to_peers();
             }
         }

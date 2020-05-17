@@ -424,15 +424,15 @@ impl RaftPeer {
                     } else {
                         // It means follower's log conflict with leader log.
                         // So we need to fast back up.
-                        let mut prev_index = append_logs_args.prev_log_index as usize; // Get the previous log index.
+                        let mut prev_index = append_logs_args.prev_log_index as i64; // Get the previous log index.
 
                         // We will back up to a index which is first index of previous log term.
                         while prev_index > 0
-                            && self.logs[prev_index].term == append_logs_args.prev_log_term
+                            && self.logs[prev_index as usize].term == append_logs_args.prev_log_term
                         {
                             prev_index -= 1;
                         }
-                        self.next_indexes[peer_id] = prev_index + 1
+                        self.next_indexes[peer_id] = (prev_index + 1) as usize
                     }
                 }
             }
@@ -446,7 +446,6 @@ impl RaftPeer {
             let msg = ApplyMsg {
                 command_valid: true,
                 command: self.logs[self.last_applied_index].clone().command_buf,
-                // The following two don't matter
                 command_index: self.last_applied_index as u64,
             };
             self.apply_ch.unbounded_send(msg).unwrap_or_else(|_| ());
