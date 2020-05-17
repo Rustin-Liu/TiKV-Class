@@ -30,13 +30,16 @@ impl RaftSever {
                         Action::RequestVote(args, sender) => {
                             debug!("{}: Got a request vote action", self.raft.me);
                             let reply = self.raft.request_vote_handler(&args);
-                            if reply.vote_granted {
-                                let mut last_update_time = self.last_receive_time.lock().unwrap();
-                                *last_update_time = Instant::now();
-                            }
-                            sender.send(reply).unwrap_or_else(|_| {
+
+                            if sender.send(reply.clone()).is_ok() {
+                                if reply.vote_granted {
+                                    let mut last_update_time =
+                                        self.last_receive_time.lock().unwrap();
+                                    *last_update_time = Instant::now();
+                                }
+                            } else {
                                 info!("PRC ERROR {}: send RequestVoteReply error", self.raft.me);
-                            })
+                            }
                         }
                         Action::AppendLogs(args, sender) => {
                             debug!(
@@ -44,13 +47,16 @@ impl RaftSever {
                                 self.raft.me, args.leader_id
                             );
                             let reply = self.raft.append_logs_handler(&args);
-                            if reply.success {
-                                let mut last_update_time = self.last_receive_time.lock().unwrap();
-                                *last_update_time = Instant::now();
-                            }
-                            sender.send(reply).unwrap_or_else(|_| {
+
+                            if sender.send(reply.clone()).is_ok() {
+                                if reply.success {
+                                    let mut last_update_time =
+                                        self.last_receive_time.lock().unwrap();
+                                    *last_update_time = Instant::now();
+                                }
+                            } else {
                                 info!("PRC ERROR {}: send AppendLogsReply error", self.raft.me);
-                            })
+                            }
                         }
                         Action::KickOffElection => {
                             debug!("{}: Got a kick off election action", self.raft.me);
