@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const APPLY_INTERVAL: u64 = 300;
+const APPLY_INTERVAL: u64 = 250;
+const HEART_BEAT_INTERVAL_TIMES: u64 = 500_000;
 
 pub struct RaftSever {
     pub raft: RaftPeer,
@@ -19,6 +20,7 @@ pub struct RaftSever {
 impl RaftSever {
     pub fn action_handler(&mut self) {
         let mut msg_receiver = self.action_receiver.lock().unwrap();
+        let mut try_times = 0;
         loop {
             if self.raft.dead.load(Ordering::SeqCst) {
                 return;
@@ -30,16 +32,11 @@ impl RaftSever {
                         Action::RequestVote(args, sender) => {
                             debug!("{}: Got a request vote action", self.raft.me);
                             let reply = self.raft.request_vote_handler(&args);
-
-                            if sender.send(reply.clone()).is_ok() {
-                                if reply.vote_granted {
-                                    let mut last_update_time =
-                                        self.last_receive_time.lock().unwrap();
-                                    *last_update_time = Instant::now();
-                                }
-                            } else {
+                            let mut last_update_time = self.last_receive_time.lock().unwrap();
+                            *last_update_time = Instant::now();
+                            sender.send(reply).unwrap_or_else(|_| {
                                 info!("PRC ERROR {}: send RequestVoteReply error", self.raft.me);
-                            }
+                            })
                         }
                         Action::AppendLogs(args, sender) => {
                             debug!(
@@ -47,16 +44,11 @@ impl RaftSever {
                                 self.raft.me, args.leader_id
                             );
                             let reply = self.raft.append_logs_handler(&args);
-
-                            if sender.send(reply.clone()).is_ok() {
-                                if reply.success {
-                                    let mut last_update_time =
-                                        self.last_receive_time.lock().unwrap();
-                                    *last_update_time = Instant::now();
-                                }
-                            } else {
+                            let mut last_update_time = self.last_receive_time.lock().unwrap();
+                            *last_update_time = Instant::now();
+                            sender.send(reply).unwrap_or_else(|_| {
                                 info!("PRC ERROR {}: send AppendLogsReply error", self.raft.me);
-                            }
+                            })
                         }
                         Action::KickOffElection => {
                             debug!("{}: Got a kick off election action", self.raft.me);
@@ -81,9 +73,13 @@ impl RaftSever {
                     None => info!("Got a none msg"),
                 }
             }
-            if self.raft.is_leader.load(Ordering::SeqCst) {
+            if self.raft.is_leader.load(Ordering::SeqCst)
+                && try_times % HEART_BEAT_INTERVAL_TIMES == 0
+            {
                 self.raft.append_logs_to_peers();
+                try_times = 0;
             }
+            try_times += 1;
         }
     }
 

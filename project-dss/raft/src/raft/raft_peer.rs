@@ -105,9 +105,9 @@ impl RaftPeer {
 
     /// Convert it self to leader and init index.
     pub fn convert_to_leader(&mut self) {
+        self.init_index();
         self.role = Role::Leader;
         self.is_leader.store(true, Ordering::SeqCst);
-        self.init_index();
     }
 
     // Init matched_indexes and next_indexes indexes.
@@ -262,10 +262,8 @@ impl RaftPeer {
         // If we get a term less than ourselves, we immediately refuse to vote for this candidate.
         if args.term < current_term {
             reply.vote_granted = false;
-        } else {
-            if args.term > current_term {
-                self.convert_to_follower(args.term);
-            }
+        } else if args.term >= current_term {
+            self.convert_to_follower(args.term);
             if self.voted_for.is_none() && is_more_update {
                 self.voted_for = Some(args.candidate_id as usize);
                 reply.vote_granted = true;
