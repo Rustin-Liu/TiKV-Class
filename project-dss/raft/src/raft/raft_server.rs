@@ -20,7 +20,7 @@ pub struct RaftSever {
 impl RaftSever {
     pub fn action_handler(&mut self) {
         let mut msg_receiver = self.action_receiver.lock().unwrap();
-        let mut try_times = 0;
+        let mut try_next_msg_times = 0;
         loop {
             if self.raft.dead.load(Ordering::SeqCst) {
                 return;
@@ -74,12 +74,12 @@ impl RaftSever {
                 }
             }
             if self.raft.is_leader.load(Ordering::SeqCst)
-                && try_times % HEART_BEAT_INTERVAL_TIMES == 0
+                && try_next_msg_times % HEART_BEAT_INTERVAL_TIMES == 0
             {
                 self.raft.append_logs_to_peers();
-                try_times = 0;
+                try_next_msg_times = 0;
             }
-            try_times += 1;
+            try_next_msg_times += 1;
         }
     }
 
