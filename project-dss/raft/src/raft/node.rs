@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
+use tokio::runtime::Runtime;
 
 // Choose concurrency paradigm.
 //
@@ -99,7 +100,8 @@ impl Node {
         } else {
             return Err(Error::NotLeader);
         }
-        if let Ok(res) = futures::executor::block_on(async {
+        let mut runtime = Runtime::new().unwrap();
+        if let Ok(res) = runtime.block_on(async {
             return receiver.await;
         }) {
             res
