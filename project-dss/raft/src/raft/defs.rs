@@ -45,4 +45,5 @@ pub enum Action {
     KickOffElection,
     Start(Vec<u8>, Sender<Result<(u64, u64)>>),
     Apply,
+    StartAppendLogs,
 }

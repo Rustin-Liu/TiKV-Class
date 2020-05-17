@@ -8,7 +8,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const APPLY_INTERVAL: u64 = 300;
-const HEART_BEAT_INTERVAL_TIMES: u64 = 500_000;
 
 pub struct RaftSever {
     pub raft: RaftPeer,
@@ -20,7 +19,6 @@ pub struct RaftSever {
 impl RaftSever {
     pub fn action_handler(&mut self) {
         let mut msg_receiver = self.action_receiver.lock().unwrap();
-        let mut try_next_msg_times = 0;
         loop {
             if self.raft.dead.load(Ordering::SeqCst) {
                 return;
@@ -54,8 +52,20 @@ impl RaftSever {
                             debug!("{}: Got a kick off election action", self.raft.me);
                             self.raft.convert_to_candidate();
                             let success = self.raft.kick_off_election();
+                            let sender = self.action_sender.clone();
+                            let is_leader = Arc::clone(&self.raft.is_leader);
                             if success {
                                 self.raft.append_logs_to_peers();
+                                thread::spawn(move || loop {
+                                    if is_leader.load(Ordering::SeqCst) && !sender.is_closed() {
+                                        sender
+                                            .clone()
+                                            .unbounded_send(Action::StartAppendLogs)
+                                            .map_err(|_| ())
+                                            .unwrap_or_else(|_| ());
+                                    }
+                                    thread::sleep(Duration::from_millis(50));
+                                });
                             }
                         }
                         Action::Start(command_buf, sender) => {
@@ -69,17 +79,13 @@ impl RaftSever {
                             debug!("{}: Got a apply action", self.raft.me);
                             self.raft.apply()
                         }
+                        Action::StartAppendLogs => {
+                            self.raft.append_logs_to_peers();
+                        }
                     },
                     None => info!("Got a none msg"),
                 }
             }
-            if self.raft.is_leader.load(Ordering::SeqCst)
-                && try_next_msg_times % HEART_BEAT_INTERVAL_TIMES == 0
-            {
-                self.raft.append_logs_to_peers();
-                try_next_msg_times = 0;
-            }
-            try_next_msg_times += 1;
         }
     }
 
