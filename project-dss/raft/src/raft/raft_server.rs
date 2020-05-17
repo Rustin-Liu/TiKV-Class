@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 const APPLY_INTERVAL: u64 = 100;
 
-const HEARTBEAT_INTERVAL: u64 = 100;
+const HEARTBEAT_INTERVAL: u64 = 50;
 
 pub struct RaftSever {
     pub raft: RaftPeer,
