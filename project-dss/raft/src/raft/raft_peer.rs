@@ -306,6 +306,7 @@ impl RaftPeer {
         }
         // If no conflict with leader's log.
         // We just append the entries to our log.
+        self.logs.truncate(args.prev_log_index as usize + 1);
         self.logs.extend_from_slice(&args.entries);
         // Update the committed index.
         if args.leader_committed_index > self.committed_index as u64 {

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const APPLY_INTERVAL: u64 = 300;
+const APPLY_INTERVAL: u64 = 600;
 
 pub struct RaftSever {
     pub raft: RaftPeer,
