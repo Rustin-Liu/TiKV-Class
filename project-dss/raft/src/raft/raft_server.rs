@@ -92,7 +92,7 @@ impl RaftSever {
         let mut rng = rand::thread_rng();
         loop {
             let start_time = Instant::now();
-            let election_timeout = rng.gen_range(150, 300);
+            let election_timeout = rng.gen_range(100, 300);
             thread::sleep(Duration::from_millis(election_timeout));
             if dead.load(Ordering::SeqCst) {
                 return;
