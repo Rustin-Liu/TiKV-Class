@@ -64,7 +64,7 @@ impl RaftSever {
                                             .map_err(|_| ())
                                             .unwrap_or_else(|_| ());
                                     }
-                                    thread::sleep(Duration::from_millis(50));
+                                    thread::sleep(Duration::from_millis(100));
                                 });
                             }
                         }
