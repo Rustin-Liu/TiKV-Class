@@ -297,7 +297,7 @@ impl RaftPeer {
         {
             // If our logs length longer than leader log, we need to delete the useless log.
             if args.prev_log_index < self.logs.len() as u64 {
-                self.logs.drain(args.prev_log_index as usize..);
+                self.logs.truncate(args.prev_log_index as usize);
             }
             return AppendLogsReply {
                 term: current_term,
