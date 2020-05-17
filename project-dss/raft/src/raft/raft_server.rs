@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const APPLY_INTERVAL: u64 = 250;
+const APPLY_INTERVAL: u64 = 300;
 const HEART_BEAT_INTERVAL_TIMES: u64 = 500_000;
 
 pub struct RaftSever {
@@ -92,7 +92,7 @@ impl RaftSever {
         let mut rng = rand::thread_rng();
         loop {
             let start_time = Instant::now();
-            let election_timeout = rng.gen_range(100, 300);
+            let election_timeout = rng.gen_range(150, 300);
             thread::sleep(Duration::from_millis(election_timeout));
             if dead.load(Ordering::SeqCst) {
                 return;
