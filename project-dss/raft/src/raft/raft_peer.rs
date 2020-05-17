@@ -428,7 +428,7 @@ impl RaftPeer {
                         let mut prev_index = append_logs_args.prev_log_index as i64; // Get the previous log index.
 
                         // We will back up to a index which is first index of previous log term.
-                        while prev_index > 0
+                        while prev_index >= 0
                             && self.logs[prev_index as usize].term == append_logs_args.prev_log_term
                         {
                             prev_index -= 1;
