@@ -20,23 +20,26 @@ impl RaftSever {
     pub fn action_handler(&mut self) {
         let mut msg_receiver = self.action_receiver.lock().unwrap();
         loop {
+            if self.raft.dead.load(Ordering::SeqCst) {
+                return;
+            }
             let msg = msg_receiver.try_next();
             if let Ok(msg) = msg {
                 match msg {
                     Some(msg) => match msg {
                         Action::RequestVote(args, sender) => {
-                            info!("{}: Got a request vote action", self.raft.me);
+                            debug!("{}: Got a request vote action", self.raft.me);
                             let reply = self.raft.request_vote_handler(&args);
                             if reply.vote_granted {
                                 let mut last_update_time = self.last_receive_time.lock().unwrap();
                                 *last_update_time = Instant::now();
                             }
                             sender.send(reply).unwrap_or_else(|_| {
-                                debug!("send RequestVoteReply error");
+                                debug!("{}: send RequestVoteReply error", self.raft.me);
                             })
                         }
                         Action::AppendLogs(args, sender) => {
-                            info!(
+                            debug!(
                                 "{}: Got a append logs from {}",
                                 self.raft.me, args.leader_id
                             );
@@ -46,11 +49,11 @@ impl RaftSever {
                                 *last_update_time = Instant::now();
                             }
                             sender.send(reply).unwrap_or_else(|_| {
-                                debug!("send RequestVoteReply error");
+                                debug!("{}: send AppendLogsReply error", self.raft.me);
                             })
                         }
                         Action::KickOffElection => {
-                            info!("{}: Got a kick off election action", self.raft.me);
+                            debug!("{}: Got a kick off election action", self.raft.me);
                             self.raft.convert_to_candidate();
                             let success = self.raft.kick_off_election();
                             if success {
@@ -58,12 +61,16 @@ impl RaftSever {
                             }
                         }
                         Action::Start(command_buf, sender) => {
+                            debug!("{}: Got a start action", self.raft.me);
                             let result = self.raft.start(command_buf);
                             sender.send(result).unwrap_or_else(|_| {
-                                debug!("send Start result error");
+                                debug!("{}: send Start result error", self.raft.me);
                             })
                         }
-                        Action::Apply => self.raft.apply(),
+                        Action::Apply => {
+                            debug!("{}: Got a apply action", self.raft.me);
+                            self.raft.apply()
+                        }
                     },
                     None => info!("Got a none msg"),
                 }
@@ -104,9 +111,12 @@ impl RaftSever {
         }
     }
 
-    pub fn apply_timer(action_sender: UnboundedSender<Action>) {
+    pub fn apply_timer(action_sender: UnboundedSender<Action>, dead: Arc<AtomicBool>) {
         loop {
-            thread::sleep(Duration::from_millis(5));
+            if dead.load(Ordering::SeqCst) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(150));
             if !action_sender.is_closed() {
                 action_sender
                     .clone()

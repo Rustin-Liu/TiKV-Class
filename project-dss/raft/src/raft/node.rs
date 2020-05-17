@@ -44,7 +44,8 @@ impl Node {
         let current_term = Arc::clone(&raft.current_term);
         let is_leader_for_server = Arc::clone(&raft.is_leader);
         let is_leader_for_node = Arc::clone(&raft.is_leader);
-        let dead_for_server = Arc::clone(&raft.dead);
+        let dead_for_election_timer = Arc::clone(&raft.dead);
+        let dead_for_apply_timer = Arc::clone(&raft.dead);
         let dead_for_node = Arc::clone(&raft.dead);
         let mut server = RaftSever {
             raft,
@@ -57,11 +58,11 @@ impl Node {
             RaftSever::election_timer(
                 election_timer_sender,
                 is_leader_for_server,
-                dead_for_server,
+                dead_for_election_timer,
                 last_receive_time,
             )
         });
-        thread::spawn(|| RaftSever::apply_timer(apply_timer_sender));
+        thread::spawn(|| RaftSever::apply_timer(apply_timer_sender, dead_for_apply_timer));
         Node {
             msg_sender: node_sender,
             current_term,
