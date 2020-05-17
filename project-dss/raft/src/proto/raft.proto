@@ -21,3 +21,9 @@ message AppendLogsReply {
   uint64 term = 1;
   bool success = 2;
 }
+
+message LogEntry {
+  uint64 term = 1;
+  uint64 index = 2;
+  bytes command_buf = 3;
+}

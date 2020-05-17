@@ -57,6 +57,12 @@ impl RaftSever {
                                 self.raft.append_logs_to_peers();
                             }
                         }
+                        Action::Start(command_buf, sender) => {
+                            let result = self.raft.start(command_buf);
+                            sender.send(result).unwrap_or_else(|_| {
+                                debug!("send Start result error");
+                            })
+                        }
                     },
                     None => info!("Got a none msg"),
                 }

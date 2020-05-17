@@ -27,6 +27,11 @@ pub struct RaftPeer {
     // Peer current role.
     pub role: Role,
     pub dead: Arc<AtomicBool>,
+    pub logs: Vec<LogEntry>,
+    pub commit_index: usize,
+    pub last_applied_index: usize,
+    pub next_indexes: Vec<usize>,
+    pub matched_indexes: Vec<usize>,
     pub apply_ch: UnboundedSender<ApplyMsg>,
 }
 
@@ -46,6 +51,7 @@ impl RaftPeer {
         apply_ch: UnboundedSender<ApplyMsg>,
     ) -> RaftPeer {
         let raft_state = persister.raft_state();
+        let peers_len = peers.len();
         let mut rf = RaftPeer {
             peers,
             persister: Mutex::new(persister),
@@ -55,6 +61,11 @@ impl RaftPeer {
             voted_for: None,
             role: Default::default(),
             dead: Arc::new(Default::default()),
+            logs: vec![],
+            commit_index: 0,
+            last_applied_index: 0,
+            next_indexes: Vec::with_capacity(peers_len),
+            matched_indexes: Vec::with_capacity(peers_len),
             apply_ch,
         };
         // initialize from state persisted before a crash
@@ -112,21 +123,33 @@ impl RaftPeer {
         // }
     }
 
-    fn start<M>(&self, command: &M) -> Result<(u64, u64)>
-    where
-        M: labcodec::Message,
-    {
-        let index = 0;
-        let term = 0;
-        let is_leader = true;
-        let mut buf = vec![];
-        labcodec::encode(command, &mut buf).map_err(Error::Encode)?;
-        // Your code here (2B).
+    pub fn start(&mut self, command_buf: Vec<u8>) -> Result<(u64, u64)> {
+        let is_leader = self.is_leader.load(Ordering::SeqCst);
+        if !is_leader {
+            return Err(Error::NotLeader);
+        }
+        let index = match self.get_last_entry() {
+            Some(entry) => entry.index + 1,
+            None => 0,
+        };
+        let me = self.me;
+        let current_term = self.current_term.load(Ordering::SeqCst);
+        let log = LogEntry {
+            command_buf,
+            term: current_term,
+            index,
+        };
+        self.logs.push(log);
+        self.next_indexes[me] = self.logs.len();
+        self.matched_indexes[me] = self.logs.len() - 1;
+        Ok((index as u64, current_term))
+    }
 
-        if is_leader {
-            Ok((index, term))
+    fn get_last_entry(&self) -> Option<&LogEntry> {
+        if !self.logs.is_empty() {
+            self.logs.last()
         } else {
-            Err(Error::NotLeader)
+            None
         }
     }
 
@@ -265,7 +288,6 @@ impl RaftPeer {
     /// Only for suppressing deadcode warnings.
     #[doc(hidden)]
     pub fn __suppress_deadcode(&mut self) {
-        let _ = self.start(&0);
         let _ = self.send_request_vote(0, &Default::default());
         self.persist();
         let _ = &self.me;

@@ -1,7 +1,7 @@
-use labrpc::Result;
-
 use crate::proto::raftpb::*;
 use crate::raft::defs::{Action, State};
+use crate::raft::errors;
+use crate::raft::errors::Error;
 use crate::raft::raft_peer::RaftPeer;
 use crate::raft::raft_server::RaftSever;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
@@ -80,14 +80,29 @@ impl Node {
     /// at if it's ever committed. the second is the current term.
     ///
     /// This method must return without blocking on the raft.
-    pub fn start<M>(&self, command: &M) -> Result<(u64, u64)>
+    pub fn start<M>(&self, command: &M) -> errors::Result<(u64, u64)>
     where
         M: labcodec::Message,
     {
-        // Your code here.
-        // Example:
-        // self.raft.start(command)
-        crate::your_code_here(command)
+        let mut command_buf = vec![];
+        labcodec::encode(command, &mut command_buf).map_err(Error::Encode)?;
+        let (sender, receiver) = channel();
+        if !self.msg_sender.is_closed() {
+            self.msg_sender
+                .clone()
+                .unbounded_send(Action::Start(command_buf, sender))
+                .map_err(|_| ())
+                .unwrap_or_else(|_| ());
+        } else {
+            return Err(Error::NotLeader);
+        }
+        if let Ok(res) = futures::executor::block_on(async {
+            return receiver.await;
+        }) {
+            res
+        } else {
+            Err(Error::NotLeader)
+        }
     }
 
     /// The current term of this peer.
@@ -123,7 +138,7 @@ impl Node {
 
 #[async_trait::async_trait]
 impl RaftService for Node {
-    async fn request_vote(&self, args: RequestVoteArgs) -> Result<RequestVoteReply> {
+    async fn request_vote(&self, args: RequestVoteArgs) -> labrpc::Result<RequestVoteReply> {
         let (sender, receiver) = channel();
         if !self.msg_sender.is_closed() {
             self.msg_sender
@@ -134,7 +149,7 @@ impl RaftService for Node {
         }
         Ok(receiver.await.unwrap())
     }
-    async fn append_logs(&self, args: AppendLogsArgs) -> Result<AppendLogsReply> {
+    async fn append_logs(&self, args: AppendLogsArgs) -> labrpc::Result<AppendLogsReply> {
         let (sender, receiver) = channel();
         if !self.msg_sender.is_closed() {
             self.msg_sender
