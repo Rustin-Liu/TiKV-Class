@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const APPLY_INTERVAL: u64 = 600;
+const APPLY_INTERVAL: u64 = 300;
 
 pub struct RaftSever {
     pub raft: RaftPeer,
@@ -35,7 +35,7 @@ impl RaftSever {
                                 *last_update_time = Instant::now();
                             }
                             sender.send(reply).unwrap_or_else(|_| {
-                                debug!("{}: send RequestVoteReply error", self.raft.me);
+                                info!("PRC ERROR {}: send RequestVoteReply error", self.raft.me);
                             })
                         }
                         Action::AppendLogs(args, sender) => {
@@ -49,7 +49,7 @@ impl RaftSever {
                                 *last_update_time = Instant::now();
                             }
                             sender.send(reply).unwrap_or_else(|_| {
-                                debug!("{}: send AppendLogsReply error", self.raft.me);
+                                info!("PRC ERROR {}: send AppendLogsReply error", self.raft.me);
                             })
                         }
                         Action::KickOffElection => {
@@ -64,7 +64,7 @@ impl RaftSever {
                             debug!("{}: Got a start action", self.raft.me);
                             let result = self.raft.start(command_buf);
                             sender.send(result).unwrap_or_else(|_| {
-                                debug!("{}: send Start result error", self.raft.me);
+                                info!("PRC ERROR {}: send Start result error", self.raft.me);
                             })
                         }
                         Action::Apply => {
@@ -116,7 +116,6 @@ impl RaftSever {
             if dead.load(Ordering::SeqCst) {
                 return;
             }
-            thread::sleep(Duration::from_millis(APPLY_INTERVAL));
             if !action_sender.is_closed() {
                 action_sender
                     .clone()
@@ -124,6 +123,7 @@ impl RaftSever {
                     .map_err(|_| ())
                     .unwrap_or_else(|_| ());
             }
+            thread::sleep(Duration::from_millis(APPLY_INTERVAL));
         }
     }
 }
