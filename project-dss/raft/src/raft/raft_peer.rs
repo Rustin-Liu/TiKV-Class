@@ -5,6 +5,7 @@ use crate::raft::defs::{ApplyMsg, Role};
 use crate::raft::errors::Error::Others;
 use crate::raft::errors::{Error, Result};
 use crate::raft::persister::Persister;
+use std::cmp;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -28,7 +29,7 @@ pub struct RaftPeer {
     pub role: Role,
     pub dead: Arc<AtomicBool>,
     pub logs: Vec<LogEntry>,
-    pub commit_index: usize,
+    pub committed_index: usize,
     pub last_applied_index: usize,
     pub next_indexes: Vec<usize>,
     pub matched_indexes: Vec<usize>,
@@ -61,11 +62,15 @@ impl RaftPeer {
             voted_for: None,
             role: Default::default(),
             dead: Arc::new(Default::default()),
-            logs: vec![],
-            commit_index: 0,
+            logs: vec![LogEntry {
+                term: 0,
+                index: 0,
+                command_buf: vec![],
+            }],
+            committed_index: 0,
             last_applied_index: 0,
-            next_indexes: Vec::with_capacity(peers_len),
-            matched_indexes: Vec::with_capacity(peers_len),
+            next_indexes: (0..peers_len).map(|_| 0).collect(),
+            matched_indexes: (0..peers_len).map(|_| 0).collect(),
             apply_ch,
         };
         // initialize from state persisted before a crash
@@ -91,6 +96,15 @@ impl RaftPeer {
     pub fn convert_to_leader(&mut self) {
         self.role = Role::Leader;
         self.is_leader.store(true, Ordering::SeqCst);
+        self.init_index();
+    }
+
+    fn init_index(&mut self) {
+        let logs_len = self.logs.len();
+        for index in 0..self.peers.len() {
+            self.matched_indexes[index] = 0;
+            self.next_indexes[index] = logs_len;
+        }
     }
 
     /// save Raft's persistent state to stable storage,
@@ -153,6 +167,20 @@ impl RaftPeer {
         }
     }
 
+    fn update_committed_index(&mut self) {
+        let majority_index = RaftPeer::get_majority_same_index(self.matched_indexes.clone());
+        let current_term = self.current_term.load(Ordering::SeqCst);
+        if self.logs[majority_index].term == current_term && majority_index > self.committed_index {
+            self.committed_index = majority_index;
+        }
+    }
+
+    fn get_majority_same_index(mut matched_index: Vec<usize>) -> usize {
+        matched_index.sort();
+        let index = matched_index.len() / 2;
+        matched_index[index]
+    }
+
     async fn send_request_vote(
         &self,
         server: usize,
@@ -189,6 +217,16 @@ impl RaftPeer {
     pub fn request_vote_handler(&mut self, args: &RequestVoteArgs) -> RequestVoteReply {
         let mut reply = RequestVoteReply::default();
         let current_term = self.current_term.load(Ordering::SeqCst);
+        let last_entry = self.get_last_entry();
+        let is_more_update = {
+            match last_entry {
+                Some(entry) => {
+                    (args.last_log_term == entry.term && args.last_log_index >= entry.index)
+                        || args.last_log_term > entry.term
+                }
+                None => true,
+            }
+        };
         reply.term = current_term;
         if args.term < current_term {
             reply.vote_granted = false;
@@ -196,7 +234,7 @@ impl RaftPeer {
             if args.term > current_term {
                 self.convert_to_follower(args.term);
             }
-            if self.voted_for.is_none() {
+            if self.voted_for.is_none() && is_more_update {
                 self.voted_for = Some(args.candidate_id as usize);
                 reply.vote_granted = true;
             }
@@ -215,6 +253,27 @@ impl RaftPeer {
         if args.term > current_term {
             self.convert_to_follower(args.term)
         }
+
+        if args.prev_log_index >= self.logs.len() as u64
+            || self.logs[args.prev_log_index as usize].term != args.prev_log_term
+        {
+            // If our log length longer than leader log, we need to delete the useless log.
+            if args.prev_log_index < self.logs.len() as u64 {
+                self.logs.drain(args.prev_log_index as usize..);
+            }
+            return AppendLogsReply {
+                term: current_term,
+                success: false,
+            };
+        }
+        // If no conflict with leader's log.
+        // We just append the entries to our log.
+        self.logs.extend_from_slice(&args.entries);
+        // Update the committed index.
+        if args.leader_committed_index > self.committed_index as u64 {
+            self.committed_index =
+                cmp::min(args.leader_committed_index, self.logs.len() as u64 - 1) as usize;
+        }
         AppendLogsReply {
             term: current_term,
             success: true,
@@ -224,9 +283,21 @@ impl RaftPeer {
     pub fn kick_off_election(&mut self) -> bool {
         let me = self.me;
         let current_term = self.current_term.load(Ordering::SeqCst);
-        let request_vote_args = RequestVoteArgs {
-            term: current_term,
-            candidate_id: me as u64,
+        let last_log = self.get_last_entry();
+
+        let request_vote_args = match last_log {
+            Some(entry) => RequestVoteArgs {
+                term: current_term,
+                candidate_id: me as u64,
+                last_log_index: entry.index,
+                last_log_term: entry.term,
+            },
+            None => RequestVoteArgs {
+                term: current_term,
+                candidate_id: me as u64,
+                last_log_index: 0,
+                last_log_term: 0,
+            },
         };
         let mut vote_count = 1 as usize;
         let peers_len = self.peers.len();
@@ -266,20 +337,72 @@ impl RaftPeer {
         let mut runtime = Runtime::new().unwrap();
         for peer_id in 0..peers_len {
             if peer_id != me {
+                let peer_next_index = self.next_indexes[peer_id];
+                let prev_log_index = if peer_next_index == 0 {
+                    0
+                } else {
+                    peer_next_index - 1
+                };
                 let append_logs_args = AppendLogsArgs {
                     term: current_term,
                     leader_id: me as u64,
+                    prev_log_index: peer_next_index as u64,
+                    prev_log_term: self.logs[prev_log_index].term,
+                    entries: self.logs.split_at(peer_next_index).1.to_vec(),
+                    leader_committed_index: self.committed_index as u64,
                 };
                 runtime.block_on(async {
-                    let reply = self.send_append_log(peer_id, append_logs_args).await;
-                    if let Ok(reply) = reply {
-                        if reply.term > current_term {
-                            self.convert_to_follower(reply.term);
-                        }
+                    let reply = self
+                        .send_append_log(peer_id, append_logs_args.clone())
+                        .await;
+                    let current_term = self.current_term.load(Ordering::SeqCst);
+                    if self.role != Role::Leader || current_term != append_logs_args.term {
                         return;
+                    }
+                    if let Ok(reply) = reply {
+                        if reply.success {
+                            // Update matched indexes and next indexes.
+                            self.matched_indexes[peer_id] = append_logs_args.prev_log_index
+                                as usize
+                                + append_logs_args.entries.len();
+                            self.next_indexes[peer_id] = self.matched_indexes[peer_id] + 1;
+                            self.update_committed_index();
+                            return;
+                        } else {
+                            // If replay term more than current term, we should convert ourselves be a follower.
+                            if reply.term > current_term {
+                                self.convert_to_follower(reply.term);
+                                return;
+                            } else {
+                                // It means follower's log conflict with leader log.
+                                // So we need to fast back up.
+                                let mut prev_index = append_logs_args.prev_log_index as usize; // Get the previous log index.
+
+                                // We will back up to a index which is first index of previous log term.
+                                while prev_index > 0
+                                    && self.logs[prev_index].term == append_logs_args.prev_log_term
+                                {
+                                    prev_index -= 1;
+                                }
+                                self.next_indexes[peer_id] = prev_index + 1
+                            }
+                        }
                     }
                 });
             }
+        }
+    }
+
+    pub fn apply(&mut self) {
+        while self.last_applied_index < self.committed_index {
+            self.last_applied_index += 1;
+            let msg = ApplyMsg {
+                command_valid: true,
+                command: self.logs[self.last_applied_index].clone().command_buf,
+                // The following two don't matter
+                command_index: self.last_applied_index as u64,
+            };
+            self.apply_ch.unbounded_send(msg).unwrap_or_else(|_| ());
         }
     }
 }

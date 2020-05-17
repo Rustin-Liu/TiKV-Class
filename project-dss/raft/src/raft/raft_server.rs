@@ -63,6 +63,7 @@ impl RaftSever {
                                 debug!("send Start result error");
                             })
                         }
+                        Action::Apply => self.raft.apply(),
                     },
                     None => info!("Got a none msg"),
                 }
@@ -99,6 +100,19 @@ impl RaftSever {
                         .map_err(|_| ())
                         .unwrap_or_else(|_| ());
                 }
+            }
+        }
+    }
+
+    pub fn apply_timer(action_sender: UnboundedSender<Action>) {
+        loop {
+            thread::sleep(Duration::from_millis(5));
+            if !action_sender.is_closed() {
+                action_sender
+                    .clone()
+                    .unbounded_send(Action::Apply)
+                    .map_err(|_| ())
+                    .unwrap_or_else(|_| ());
             }
         }
     }

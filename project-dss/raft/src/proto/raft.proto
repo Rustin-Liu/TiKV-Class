@@ -5,6 +5,8 @@ package raftpb;
 message RequestVoteArgs {
   uint64 term = 1;
   uint64 candidate_id = 2;
+  uint64 last_log_index = 3; // Candidate's latest log entry index.
+  uint64 last_log_term = 4; // Candidate's latest log entry term.
 }
 
 message RequestVoteReply {
@@ -15,6 +17,10 @@ message RequestVoteReply {
 message AppendLogsArgs {
   uint64 term = 1;
   uint64 leader_id = 2;
+  uint64 prev_log_index = 3;
+  uint64 prev_log_term = 4;
+  repeated LogEntry entries = 6;
+  uint64   leader_committed_index = 7;
 }
 
 message AppendLogsReply {
