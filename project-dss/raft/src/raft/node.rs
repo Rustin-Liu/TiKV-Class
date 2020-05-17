@@ -5,7 +5,7 @@ use crate::raft::errors::Error;
 use crate::raft::raft_peer::RaftPeer;
 use crate::raft::raft_server::RaftSever;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
-use futures::channel::oneshot::channel;
+use futures::channel::oneshot::{channel, Canceled};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -152,7 +152,10 @@ impl RaftService for Node {
                 .map_err(|_| ())
                 .unwrap_or_else(|_| ());
         }
-        Ok(receiver.await.unwrap())
+        match receiver.await {
+            Ok(reply) => Ok(reply),
+            Err(_) => Err(labrpc::Error::Recv(Canceled)),
+        }
     }
     async fn append_logs(&self, args: AppendLogsArgs) -> labrpc::Result<AppendLogsReply> {
         let (sender, receiver) = channel();
@@ -163,6 +166,9 @@ impl RaftService for Node {
                 .map_err(|_| ())
                 .unwrap_or_else(|_| ());
         }
-        Ok(receiver.await.unwrap())
+        match receiver.await {
+            Ok(reply) => Ok(reply),
+            Err(_) => Err(labrpc::Error::Recv(Canceled)),
+        }
     }
 }

@@ -12,7 +12,7 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::time::timeout;
 
-const PRC_TIMEOUT: u64 = 100;
+const PRC_TIMEOUT: u64 = 10;
 
 // A single Raft peer.
 pub struct RaftPeer {
