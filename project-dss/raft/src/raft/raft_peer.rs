@@ -347,7 +347,7 @@ impl RaftPeer {
             .filter(|(peer_id, _)| *peer_id != me) // Only send it to other peers.
             .for_each(|(peer_id, _)| {
                 runtime.block_on(async {
-                    if !success {
+                    if !success && self.role == Role::Candidate {
                         let reply = self.send_request_vote(peer_id, &request_vote_args).await;
                         if let Ok(reply) = reply {
                             if reply.vote_granted {
