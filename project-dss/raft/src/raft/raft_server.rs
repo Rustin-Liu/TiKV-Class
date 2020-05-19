@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use tokio::runtime::Runtime;
+use tokio::task;
 
 const APPLY_INTERVAL: u64 = 100;
 
@@ -16,10 +18,28 @@ pub struct RaftSever {
     pub action_sender: UnboundedSender<Action>,
     pub action_receiver: Arc<Mutex<UnboundedReceiver<Action>>>,
     pub last_receive_time: Arc<Mutex<Instant>>,
+    pub rt: Runtime,
 }
 
 impl RaftSever {
     pub fn action_handler(&mut self) {
+        let election_timer_sender = self.action_sender.clone();
+        let apply_timer_sender = self.action_sender.clone();
+        let is_leader_for_server = Arc::clone(&self.raft.is_leader);
+        let dead_for_election_timer = Arc::clone(&self.raft.dead);
+        let dead_for_apply_timer = Arc::clone(&self.raft.dead);
+        let last_receive_time = Arc::clone(&self.last_receive_time);
+        self.rt.spawn(async {
+            task::spawn(async {
+                RaftSever::election_timer(
+                    election_timer_sender,
+                    is_leader_for_server,
+                    dead_for_election_timer,
+                    last_receive_time,
+                )
+            });
+            task::spawn(async { RaftSever::apply_timer(apply_timer_sender, dead_for_apply_timer) });
+        });
         let mut msg_receiver = self.action_receiver.lock().unwrap();
         loop {
             if self.raft.dead.load(Ordering::SeqCst) {
@@ -58,15 +78,8 @@ impl RaftSever {
                             let is_leader = Arc::clone(&self.raft.is_leader);
                             if success {
                                 self.raft.append_logs_to_peers();
-                                thread::spawn(move || loop {
-                                    if is_leader.load(Ordering::SeqCst) && !sender.is_closed() {
-                                        sender
-                                            .clone()
-                                            .unbounded_send(Action::StartAppendLogs)
-                                            .map_err(|_| ())
-                                            .unwrap_or_else(|_| ());
-                                    }
-                                    thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL));
+                                self.rt.spawn(async {
+                                    RaftSever::append_timer(sender, is_leader);
                                 });
                             }
                         }
@@ -91,7 +104,7 @@ impl RaftSever {
         }
     }
 
-    pub fn election_timer(
+    fn election_timer(
         action_sender: UnboundedSender<Action>,
         is_leader: Arc<AtomicBool>,
         dead: Arc<AtomicBool>,
@@ -100,8 +113,8 @@ impl RaftSever {
         let mut rng = rand::thread_rng();
         loop {
             let start_time = Instant::now();
-            let election_timeout = rng.gen_range(150, 250);
-            thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL + election_timeout));
+            let election_timeout = rng.gen_range(200, 300);
+            thread::sleep(Duration::from_millis(election_timeout));
             if dead.load(Ordering::SeqCst) {
                 return;
             }
@@ -121,8 +134,9 @@ impl RaftSever {
         }
     }
 
-    pub fn apply_timer(action_sender: UnboundedSender<Action>, dead: Arc<AtomicBool>) {
+    fn apply_timer(action_sender: UnboundedSender<Action>, dead: Arc<AtomicBool>) {
         loop {
+            thread::sleep(Duration::from_millis(APPLY_INTERVAL));
             if dead.load(Ordering::SeqCst) {
                 return;
             }
@@ -133,7 +147,21 @@ impl RaftSever {
                     .map_err(|_| ())
                     .unwrap_or_else(|_| ());
             }
-            thread::sleep(Duration::from_millis(APPLY_INTERVAL));
         }
+    }
+
+    fn append_timer(action_sender: UnboundedSender<Action>, is_leader: Arc<AtomicBool>) {
+        task::spawn(async move {
+            loop {
+                if is_leader.load(Ordering::SeqCst) && !action_sender.is_closed() {
+                    action_sender
+                        .clone()
+                        .unbounded_send(Action::StartAppendLogs)
+                        .map_err(|_| ())
+                        .unwrap_or_else(|_| ());
+                }
+                thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL));
+            }
+        });
     }
 }

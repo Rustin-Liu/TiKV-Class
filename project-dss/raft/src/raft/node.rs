@@ -39,31 +39,19 @@ impl Node {
     pub fn new(raft: RaftPeer) -> Node {
         let (sender, receiver) = unbounded::<Action>();
         let node_sender = sender.clone();
-        let election_timer_sender = sender.clone();
-        let apply_timer_sender = sender.clone();
         let last_receive_time = Arc::new(Mutex::new(Instant::now()));
         let current_term = Arc::clone(&raft.current_term);
-        let is_leader_for_server = Arc::clone(&raft.is_leader);
         let is_leader_for_node = Arc::clone(&raft.is_leader);
-        let dead_for_election_timer = Arc::clone(&raft.dead);
-        let dead_for_apply_timer = Arc::clone(&raft.dead);
         let dead_for_node = Arc::clone(&raft.dead);
+        let rt = Runtime::new().unwrap();
         let mut server = RaftSever {
             raft,
             action_sender: sender,
             action_receiver: Arc::new(Mutex::new(receiver)),
-            last_receive_time: Arc::clone(&last_receive_time),
+            last_receive_time,
+            rt,
         };
         thread::spawn(move || server.action_handler());
-        thread::spawn(|| {
-            RaftSever::election_timer(
-                election_timer_sender,
-                is_leader_for_server,
-                dead_for_election_timer,
-                last_receive_time,
-            )
-        });
-        thread::spawn(|| RaftSever::apply_timer(apply_timer_sender, dead_for_apply_timer));
         Node {
             msg_sender: node_sender,
             current_term,
