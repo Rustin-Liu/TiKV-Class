@@ -6,7 +6,6 @@ use crate::raft::errors::Error::Others;
 use crate::raft::errors::{Error, Result};
 use crate::raft::persister::Persister;
 use futures::channel::oneshot::{channel, Receiver};
-use futures::future::ok;
 use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryFutureExt};
 use std::cmp;
@@ -239,9 +238,10 @@ impl RaftPeer {
         args: AppendLogsArgs,
     ) -> Receiver<Result<AppendLogsReply>> {
         let (sender, receiver) = channel::<Result<AppendLogsReply>>();
-        let peer = &self.peers[peer_id].clone();
-        peer.spawn(async {
-            let res = peer.append_logs(&args).map_err(Error::Rpc).await;
+        let peer = &self.peers[peer_id];
+        let client = peer.clone();
+        peer.spawn(async move {
+            let res = client.append_logs(&args).map_err(Error::Rpc).await;
             if !sender.is_canceled() {
                 sender.send(res).unwrap_or_else(|_| ());
             }
@@ -365,38 +365,40 @@ impl RaftPeer {
     }
 
     /// Append logs to peers.
-    pub fn append_logs_to_peers(&mut self, action_sender: UnboundedSender<Action>) {
+    pub fn append_logs_to_peers(&mut self, _action_sender: UnboundedSender<Action>) {
         let me = self.me;
-        let futures = FuturesUnordered::new();
+        let futures: FuturesUnordered<Receiver<Result<AppendLogsReply>>> = FuturesUnordered::new();
 
-        let result_receivers: Vec<Receiver<Result<AppendLogsReply>>> = self
+        let result_receiver: Vec<Receiver<Result<AppendLogsReply>>> = self
             .peers
             .iter()
             .enumerate()
             .filter(|(peer_id, _)| *peer_id != me)
             .map(|(peer_id, _)| self.append_logs_to_peer(peer_id))
             .collect();
-
-        for receiver in result_receivers {
+        for receiver in result_receiver {
             futures.push(receiver);
         }
-        let steam = futures.take_while(move |reply| {
-            if let Ok(reply) = reply {
-                if let Ok(reply) = reply {
-                    if !action_sender.is_closed() {
-                        action_sender
-                            .clone()
-                            .unbounded_send(Action::AppendLogsResult(*reply))
-                            .map_err(|_| ())
-                            .unwrap_or_else(|_| ());
-                    }
-                }
-            }
-        });
-        task::spawn(steam.into_future());
+        let steam_futures = futures
+            // .take_while(|reply| {
+            //     if let Ok(reply) = reply {
+            //         if let Ok(reply) = reply {
+            //             if !action_sender.is_closed() {
+            //                 action_sender
+            //                     .clone()
+            //                     .unbounded_send(Action::AppendLogsResult(*reply))
+            //                     .map_err(|_| ())
+            //                     .unwrap_or_else(|_| ());
+            //             }
+            //         }
+            //     }
+            //     ok(true)
+            // })
+            .into_future();
+        task::spawn(async { steam_futures.await });
     }
 
-    fn append_logs_to_peer(&mut self, peer_id: usize) -> Receiver<Result<AppendLogsReply>> {
+    fn append_logs_to_peer(&self, peer_id: usize) -> Receiver<Result<AppendLogsReply>> {
         let me = self.me;
         assert_ne!(peer_id, me);
         let current_term = self.current_term.load(Ordering::SeqCst);
@@ -412,7 +414,7 @@ impl RaftPeer {
             entries: self.logs.split_at(peer_next_index).1.to_vec(),
             leader_committed_index: self.committed_index as u64,
         };
-        self.send_append_log(peer_id, append_logs_args.clone())
+        self.send_append_log(peer_id, append_logs_args)
     }
 
     pub fn handle_append_logs_reply(&mut self, reply: AppendLogsReply) {
