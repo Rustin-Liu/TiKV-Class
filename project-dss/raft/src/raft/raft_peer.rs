@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::timeout;
 
-const PRC_TIMEOUT: u64 = 5;
+const PRC_TIMEOUT: u64 = 2;
 
 // A single Raft peer.
 pub struct RaftPeer {
