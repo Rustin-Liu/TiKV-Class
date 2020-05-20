@@ -8,7 +8,6 @@ use crate::raft::persister::Persister;
 use futures::channel::oneshot::{channel, Receiver};
 use futures::future::ok;
 use futures::stream::FuturesUnordered;
-use futures::task::SpawnExt;
 use futures::{StreamExt, TryFutureExt};
 use std::cmp;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -240,13 +239,13 @@ impl RaftPeer {
         args: AppendLogsArgs,
     ) -> Receiver<Result<AppendLogsReply>> {
         let (sender, receiver) = channel::<Result<AppendLogsReply>>();
-        let peer = &self.peers[peer_id];
-        peer.spawn(peer.append_logs(args).map_err(Error::Rpc).then(move |res| {
+        let peer = &self.peers[peer_id].clone();
+        peer.spawn(async {
+            let res = peer.append_logs(&args).map_err(Error::Rpc).await;
             if !sender.is_canceled() {
                 sender.send(res).unwrap_or_else(|_| ());
             }
-            ok(())
-        }));
+        });
         receiver
     }
 
@@ -278,14 +277,21 @@ impl RaftPeer {
 
     /// Handler append logs request.
     pub fn append_logs_handler(&mut self, args: &AppendLogsArgs) -> AppendLogsReply {
+        let me = self.me;
         let current_term = self.current_term.load(Ordering::SeqCst);
+        let mut reply = AppendLogsReply {
+            peer_id: me as u64,
+            term: current_term,
+            prev_log_index: args.prev_log_index,
+            prev_log_term: args.prev_log_term,
+            entries_len: args.entries.len() as u64,
+            append_term: args.term,
+            success: false,
+        };
 
         // If we got a term less than ourselves term, we need reject the append request.
         if args.term < current_term {
-            return AppendLogsReply {
-                term: current_term,
-                success: false,
-            };
+            return reply;
         }
 
         // If we get a term more than ourselves term, we need covert ourselves be a follower.
@@ -301,10 +307,7 @@ impl RaftPeer {
             if args.prev_log_index < self.logs.len() as u64 {
                 self.logs.truncate(args.prev_log_index as usize);
             }
-            return AppendLogsReply {
-                term: current_term,
-                success: false,
-            };
+            return reply;
         }
         // If no conflict with leader's log.
         // We just append the entries to our log.
@@ -315,10 +318,8 @@ impl RaftPeer {
             self.committed_index =
                 cmp::min(args.leader_committed_index, self.logs.len() as u64 - 1) as usize;
         }
-        AppendLogsReply {
-            term: current_term,
-            success: true,
-        }
+        reply.success = true;
+        reply
     }
 
     /// Kick off a election.
@@ -372,10 +373,7 @@ impl RaftPeer {
             .peers
             .iter()
             .enumerate()
-            .filter(|(peer_id, _)| {
-                // Sift yourself
-                *peer_id != me
-            })
+            .filter(|(peer_id, _)| *peer_id != me)
             .map(|(peer_id, _)| self.append_logs_to_peer(peer_id))
             .collect();
 
@@ -384,23 +382,24 @@ impl RaftPeer {
         }
         let steam = futures.take_while(move |reply| {
             if let Ok(reply) = reply {
-                if !action_sender.is_closed() {
-                    action_sender
-                        .clone()
-                        .unbounded_send(Action::AppendLogsResult(peer_id, append_logs_args, reply))
-                        .map_err(|_| ())
-                        .unwrap_or_else(|_| ());
+                if let Ok(reply) = reply {
+                    if !action_sender.is_closed() {
+                        action_sender
+                            .clone()
+                            .unbounded_send(Action::AppendLogsResult(*reply))
+                            .map_err(|_| ())
+                            .unwrap_or_else(|_| ());
+                    }
                 }
             }
         });
-        task::spawn(steam);
+        task::spawn(steam.into_future());
     }
 
     fn append_logs_to_peer(&mut self, peer_id: usize) -> Receiver<Result<AppendLogsReply>> {
         let me = self.me;
         assert_ne!(peer_id, me);
         let current_term = self.current_term.load(Ordering::SeqCst);
-
         // Peer next need append log index.
         let peer_next_index = self.next_indexes[peer_id];
         // Peer pre next need append log index.
@@ -416,22 +415,18 @@ impl RaftPeer {
         self.send_append_log(peer_id, append_logs_args.clone())
     }
 
-    pub fn handle_append_logs_reply(
-        &mut self,
-        peer_id: usize,
-        append_logs_args: AppendLogsArgs,
-        reply: AppendLogsReply,
-    ) {
+    pub fn handle_append_logs_reply(&mut self, reply: AppendLogsReply) {
         let current_term = self.current_term.load(Ordering::SeqCst);
-        if self.role != Role::Leader || current_term != append_logs_args.term {
+        if self.role != Role::Leader || current_term != reply.append_term {
             return;
         }
 
         if reply.success {
             // Update matched indexes and next indexes.
-            self.matched_indexes[peer_id] =
-                append_logs_args.prev_log_index as usize + append_logs_args.entries.len();
-            self.next_indexes[peer_id] = self.matched_indexes[peer_id] + 1;
+            self.matched_indexes[reply.peer_id as usize] =
+                (reply.prev_log_index + reply.entries_len) as usize;
+            self.next_indexes[reply.peer_id as usize] =
+                self.matched_indexes[reply.peer_id as usize] + 1;
             self.update_committed_index();
         } else {
             // If replay term more than current term, we should convert ourselves be a follower.
@@ -440,15 +435,14 @@ impl RaftPeer {
             } else {
                 // It means follower's log conflict with leader log.
                 // So we need to fast back up.
-                let mut prev_index = append_logs_args.prev_log_index as i64; // Get the previous log index.
+                let mut prev_index = reply.prev_log_index as i64; // Get the previous log index.
 
                 // We will back up to a index which is first index of previous log term.
-                while prev_index >= 0
-                    && self.logs[prev_index as usize].term == append_logs_args.prev_log_term
+                while prev_index >= 0 && self.logs[prev_index as usize].term == reply.prev_log_term
                 {
                     prev_index -= 1;
                 }
-                self.next_indexes[peer_id] = (prev_index + 1) as usize
+                self.next_indexes[reply.peer_id as usize] = (prev_index + 1) as usize
             }
         }
     }

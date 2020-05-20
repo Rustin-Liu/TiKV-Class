@@ -46,5 +46,5 @@ pub enum Action {
     Start(Vec<u8>, Sender<Result<(u64, u64)>>),
     Apply,
     StartAppendLogs,
-    AppendLogsResult(usize, AppendLogsArgs, AppendLogsReply),
+    AppendLogsResult(AppendLogsReply),
 }

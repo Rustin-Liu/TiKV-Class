@@ -24,8 +24,13 @@ message AppendLogsArgs {
 }
 
 message AppendLogsReply {
-  uint64 term = 1;
-  bool success = 2;
+  uint64 peer_id =1;
+  uint64 term = 2;
+  uint64 append_term = 3;
+  uint64 prev_log_index = 4;
+  uint64 prev_log_term = 5;
+  uint64 entries_len = 6;
+  bool success = 7;
 }
 
 message LogEntry {

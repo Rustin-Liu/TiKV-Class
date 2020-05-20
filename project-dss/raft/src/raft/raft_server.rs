@@ -95,8 +95,8 @@ impl RaftSever {
                             let sender = self.action_sender.clone();
                             self.raft.append_logs_to_peers(sender);
                         }
-                        Action::AppendLogsResult(peer_id, args, reply) => {
-                            self.raft.handle_append_logs_reply(peer_id, args, reply);
+                        Action::AppendLogsResult(reply) => {
+                            self.raft.handle_append_logs_reply(reply);
                         }
                     },
                     None => info!("Got a none msg"),
