@@ -10,7 +10,7 @@ use tokio::task;
 
 const APPLY_INTERVAL: u64 = 50;
 
-const HEARTBEAT_INTERVAL: u64 = 50;
+const HEARTBEAT_INTERVAL: u64 = 35;
 
 pub struct RaftSever {
     pub raft: RaftPeer,
