@@ -12,7 +12,6 @@ use std::cmp;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::task;
 use tokio::time::timeout;
 
 const PRC_TIMEOUT: u64 = 5;
@@ -365,9 +364,10 @@ impl RaftPeer {
     }
 
     /// Append logs to peers.
-    pub fn append_logs_to_peers(&mut self, _action_sender: UnboundedSender<Action>) {
+    pub fn append_logs_to_peers(&mut self, action_sender: UnboundedSender<Action>) {
         let me = self.me;
-        let futures: FuturesUnordered<Receiver<Result<AppendLogsReply>>> = FuturesUnordered::new();
+        let mut futures: FuturesUnordered<Receiver<Result<AppendLogsReply>>> =
+            FuturesUnordered::new();
 
         let result_receiver: Vec<Receiver<Result<AppendLogsReply>>> = self
             .peers
@@ -379,23 +379,23 @@ impl RaftPeer {
         for receiver in result_receiver {
             futures.push(receiver);
         }
-        let steam_futures = futures
-            // .take_while(|reply| {
-            //     if let Ok(reply) = reply {
-            //         if let Ok(reply) = reply {
-            //             if !action_sender.is_closed() {
-            //                 action_sender
-            //                     .clone()
-            //                     .unbounded_send(Action::AppendLogsResult(*reply))
-            //                     .map_err(|_| ())
-            //                     .unwrap_or_else(|_| ());
-            //             }
-            //         }
-            //     }
-            //     ok(true)
-            // })
-            .into_future();
-        task::spawn(async { steam_futures.await });
+        tokio::spawn(async move {
+            for _ in 0..futures.len() {
+                if let Some(reply) = futures.next().await {
+                    if let Ok(reply) = reply {
+                        if let Ok(reply) = reply {
+                            if !action_sender.is_closed() {
+                                action_sender
+                                    .clone()
+                                    .unbounded_send(Action::AppendLogsResult(reply))
+                                    .map_err(|_| ())
+                                    .unwrap_or_else(|_| ());
+                            }
+                        }
+                    }
+                }
+            }
+        });
     }
 
     fn append_logs_to_peer(&self, peer_id: usize) -> Receiver<Result<AppendLogsReply>> {

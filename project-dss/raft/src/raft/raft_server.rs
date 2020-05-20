@@ -8,7 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tokio::task;
 
-const APPLY_INTERVAL: u64 = 100;
+const APPLY_INTERVAL: u64 = 50;
 
 const HEARTBEAT_INTERVAL: u64 = 50;
 
@@ -114,8 +114,8 @@ impl RaftSever {
         let mut rng = rand::thread_rng();
         loop {
             let start_time = Instant::now();
-            let election_timeout = rng.gen_range(200, 300);
-            thread::sleep(Duration::from_millis(election_timeout));
+            let election_timeout = rng.gen_range(0, 300);
+            thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL + election_timeout));
             if dead.load(Ordering::SeqCst) {
                 return;
             }
