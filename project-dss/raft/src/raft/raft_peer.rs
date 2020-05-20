@@ -9,7 +9,6 @@ use std::cmp;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::runtime::Runtime;
 use tokio::time::timeout;
 
 const PRC_TIMEOUT: u64 = 5;
@@ -320,7 +319,7 @@ impl RaftPeer {
     /// Kick off a election.
     ///
     /// Return is become leader.
-    pub fn kick_off_election(&mut self) -> bool {
+    pub async fn kick_off_election(&mut self) -> bool {
         let me = self.me;
         let current_term = self.current_term.load(Ordering::SeqCst);
 
@@ -338,28 +337,20 @@ impl RaftPeer {
         let peers_len = self.peers.len();
         let mut success = false;
 
-        // Start to send the request and get the result.
-        let mut runtime = Runtime::new().unwrap();
-        self.peers
-            .iter()
-            .enumerate()
-            .filter(|(peer_id, _)| *peer_id != me) // Only send it to other peers.
-            .for_each(|(peer_id, _)| {
-                runtime.block_on(async {
-                    if !success && self.role == Role::Candidate {
-                        let reply = self.send_request_vote(peer_id, &request_vote_args).await;
-                        if let Ok(reply) = reply {
-                            if reply.vote_granted {
-                                info!("{}: Got a granted from {}", self.me, peer_id);
-                                vote_count += 1;
-                                if vote_count * 2 > peers_len {
-                                    success = true;
-                                }
-                            }
+        for peer_id in 0..self.peers.len() {
+            if peer_id != me && !success && self.role == Role::Candidate {
+                let reply = self.send_request_vote(peer_id, &request_vote_args).await;
+                if let Ok(reply) = reply {
+                    if reply.vote_granted {
+                        info!("{}: Got a granted from {}", self.me, peer_id);
+                        vote_count += 1;
+                        if vote_count * 2 > peers_len {
+                            success = true;
                         }
                     }
-                })
-            });
+                }
+            }
+        }
         if success {
             self.convert_to_leader();
             info!("{}: became leader on {}", self.me, current_term);
@@ -368,18 +359,18 @@ impl RaftPeer {
     }
 
     /// Append logs to peers.
-    pub fn append_logs_to_peers(&mut self) {
+    pub async fn append_logs_to_peers(&mut self) {
         let me = self.me;
         let peers_len = self.peers.iter().len();
         for peer_id in 0..peers_len {
             // Only send it to other peers.
             if peer_id != me {
-                self.append_logs_to_peer(peer_id);
+                self.append_logs_to_peer(peer_id).await;
             }
         }
     }
 
-    fn append_logs_to_peer(&mut self, peer_id: usize) {
+    async fn append_logs_to_peer(&mut self, peer_id: usize) {
         let me = self.me;
         assert_ne!(peer_id, me);
         let current_term = self.current_term.load(Ordering::SeqCst);
@@ -397,45 +388,41 @@ impl RaftPeer {
             leader_committed_index: self.committed_index as u64,
         };
 
-        //Start send logs.
-        let mut runtime = Runtime::new().unwrap();
-        runtime.block_on(async {
-            let reply = self
-                .send_append_log(peer_id, append_logs_args.clone())
-                .await;
+        let reply = self
+            .send_append_log(peer_id, append_logs_args.clone())
+            .await;
 
-            let current_term = self.current_term.load(Ordering::SeqCst);
-            if self.role != Role::Leader || current_term != append_logs_args.term {
-                return;
-            }
+        let current_term = self.current_term.load(Ordering::SeqCst);
+        if self.role != Role::Leader || current_term != append_logs_args.term {
+            return;
+        }
 
-            if let Ok(reply) = reply {
-                if reply.success {
-                    // Update matched indexes and next indexes.
-                    self.matched_indexes[peer_id] =
-                        append_logs_args.prev_log_index as usize + append_logs_args.entries.len();
-                    self.next_indexes[peer_id] = self.matched_indexes[peer_id] + 1;
-                    self.update_committed_index();
+        if let Ok(reply) = reply {
+            if reply.success {
+                // Update matched indexes and next indexes.
+                self.matched_indexes[peer_id] =
+                    append_logs_args.prev_log_index as usize + append_logs_args.entries.len();
+                self.next_indexes[peer_id] = self.matched_indexes[peer_id] + 1;
+                self.update_committed_index();
+            } else {
+                // If replay term more than current term, we should convert ourselves be a follower.
+                if reply.term > current_term {
+                    self.convert_to_follower(reply.term);
                 } else {
-                    // If replay term more than current term, we should convert ourselves be a follower.
-                    if reply.term > current_term {
-                        self.convert_to_follower(reply.term);
-                    } else {
-                        // It means follower's log conflict with leader log.
-                        // So we need to fast back up.
-                        let mut prev_index = append_logs_args.prev_log_index as i64; // Get the previous log index.
+                    // It means follower's log conflict with leader log.
+                    // So we need to fast back up.
+                    let mut prev_index = append_logs_args.prev_log_index as i64; // Get the previous log index.
 
-                        // We will back up to a index which is first index of previous log term.
-                        while prev_index >= 0
-                            && self.logs[prev_index as usize].term == append_logs_args.prev_log_term
-                        {
-                            prev_index -= 1;
-                        }
-                        self.next_indexes[peer_id] = (prev_index + 1) as usize
+                    // We will back up to a index which is first index of previous log term.
+                    while prev_index >= 0
+                        && self.logs[prev_index as usize].term == append_logs_args.prev_log_term
+                    {
+                        prev_index -= 1;
                     }
+                    self.next_indexes[peer_id] = (prev_index + 1) as usize
                 }
             }
-        });
+        }
     }
 
     /// Apply the msg.

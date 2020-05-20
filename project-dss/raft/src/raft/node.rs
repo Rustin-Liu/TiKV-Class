@@ -43,13 +43,11 @@ impl Node {
         let current_term = Arc::clone(&raft.current_term);
         let is_leader_for_node = Arc::clone(&raft.is_leader);
         let dead_for_node = Arc::clone(&raft.dead);
-        let rt = Runtime::new().unwrap();
         let mut server = RaftSever {
             raft,
             action_sender: sender,
             action_receiver: Arc::new(Mutex::new(receiver)),
             last_receive_time,
-            rt,
         };
         thread::spawn(move || server.action_handler());
         Node {
