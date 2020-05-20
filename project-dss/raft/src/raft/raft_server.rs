@@ -74,7 +74,7 @@ impl RaftSever {
                             let sender = self.action_sender.clone();
                             let is_leader = Arc::clone(&self.raft.is_leader);
                             if success {
-                                self.raft.append_logs_to_peers().await;
+                                self.raft.append_logs_to_peers(sender.clone());
                                 task::spawn(
                                     async move { RaftSever::append_timer(sender, is_leader) },
                                 );
@@ -92,7 +92,11 @@ impl RaftSever {
                             self.raft.apply()
                         }
                         Action::StartAppendLogs => {
-                            self.raft.append_logs_to_peers().await;
+                            let sender = self.action_sender.clone();
+                            self.raft.append_logs_to_peers(sender);
+                        }
+                        Action::AppendLogsResult(peer_id, args, reply) => {
+                            self.raft.handle_append_logs_reply(peer_id, args, reply);
                         }
                     },
                     None => info!("Got a none msg"),

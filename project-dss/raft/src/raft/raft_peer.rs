@@ -1,14 +1,20 @@
 use futures::channel::mpsc::UnboundedSender;
 
 use crate::proto::raftpb::*;
-use crate::raft::defs::{ApplyMsg, Role};
+use crate::raft::defs::{Action, ApplyMsg, Role};
 use crate::raft::errors::Error::Others;
 use crate::raft::errors::{Error, Result};
 use crate::raft::persister::Persister;
+use futures::channel::oneshot::{channel, Receiver};
+use futures::future::ok;
+use futures::stream::FuturesUnordered;
+use futures::task::SpawnExt;
+use futures::{StreamExt, TryFutureExt};
 use std::cmp;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::task;
 use tokio::time::timeout;
 
 const PRC_TIMEOUT: u64 = 5;
@@ -228,21 +234,20 @@ impl RaftPeer {
     }
 
     // Send append log to peer.
-    async fn send_append_log(
+    fn send_append_log(
         &self,
         peer_id: usize,
         args: AppendLogsArgs,
-    ) -> Result<AppendLogsReply> {
+    ) -> Receiver<Result<AppendLogsReply>> {
+        let (sender, receiver) = channel::<Result<AppendLogsReply>>();
         let peer = &self.peers[peer_id];
-        // We need to set timeout to prevent other requests from being blocked.
-        let result = timeout(Duration::from_millis(PRC_TIMEOUT), peer.append_logs(&args)).await;
-        match result {
-            Ok(result) => match result {
-                Ok(result) => Ok(result),
-                Err(_) => Err(Others(String::from("Append logs failed"))),
-            },
-            Err(_) => Err(Others(String::from("Append logs timeout"))),
-        }
+        peer.spawn(peer.append_logs(args).map_err(Error::Rpc).then(move |res| {
+            if !sender.is_canceled() {
+                sender.send(res).unwrap_or_else(|_| ());
+            }
+            ok(())
+        }));
+        receiver
     }
 
     /// Handle the vote request.
@@ -359,18 +364,39 @@ impl RaftPeer {
     }
 
     /// Append logs to peers.
-    pub async fn append_logs_to_peers(&mut self) {
+    pub fn append_logs_to_peers(&mut self, action_sender: UnboundedSender<Action>) {
         let me = self.me;
-        let peers_len = self.peers.iter().len();
-        for peer_id in 0..peers_len {
-            // Only send it to other peers.
-            if peer_id != me {
-                self.append_logs_to_peer(peer_id).await;
-            }
+        let futures = FuturesUnordered::new();
+
+        let result_receivers: Vec<Receiver<Result<AppendLogsReply>>> = self
+            .peers
+            .iter()
+            .enumerate()
+            .filter(|(peer_id, _)| {
+                // Sift yourself
+                *peer_id != me
+            })
+            .map(|(peer_id, _)| self.append_logs_to_peer(peer_id))
+            .collect();
+
+        for receiver in result_receivers {
+            futures.push(receiver);
         }
+        let steam = futures.take_while(move |reply| {
+            if let Ok(reply) = reply {
+                if !action_sender.is_closed() {
+                    action_sender
+                        .clone()
+                        .unbounded_send(Action::AppendLogsResult(peer_id, append_logs_args, reply))
+                        .map_err(|_| ())
+                        .unwrap_or_else(|_| ());
+                }
+            }
+        });
+        task::spawn(steam);
     }
 
-    async fn append_logs_to_peer(&mut self, peer_id: usize) {
+    fn append_logs_to_peer(&mut self, peer_id: usize) -> Receiver<Result<AppendLogsReply>> {
         let me = self.me;
         assert_ne!(peer_id, me);
         let current_term = self.current_term.load(Ordering::SeqCst);
@@ -387,40 +413,42 @@ impl RaftPeer {
             entries: self.logs.split_at(peer_next_index).1.to_vec(),
             leader_committed_index: self.committed_index as u64,
         };
+        self.send_append_log(peer_id, append_logs_args.clone())
+    }
 
-        let reply = self
-            .send_append_log(peer_id, append_logs_args.clone())
-            .await;
-
+    pub fn handle_append_logs_reply(
+        &mut self,
+        peer_id: usize,
+        append_logs_args: AppendLogsArgs,
+        reply: AppendLogsReply,
+    ) {
         let current_term = self.current_term.load(Ordering::SeqCst);
         if self.role != Role::Leader || current_term != append_logs_args.term {
             return;
         }
 
-        if let Ok(reply) = reply {
-            if reply.success {
-                // Update matched indexes and next indexes.
-                self.matched_indexes[peer_id] =
-                    append_logs_args.prev_log_index as usize + append_logs_args.entries.len();
-                self.next_indexes[peer_id] = self.matched_indexes[peer_id] + 1;
-                self.update_committed_index();
+        if reply.success {
+            // Update matched indexes and next indexes.
+            self.matched_indexes[peer_id] =
+                append_logs_args.prev_log_index as usize + append_logs_args.entries.len();
+            self.next_indexes[peer_id] = self.matched_indexes[peer_id] + 1;
+            self.update_committed_index();
+        } else {
+            // If replay term more than current term, we should convert ourselves be a follower.
+            if reply.term > current_term {
+                self.convert_to_follower(reply.term);
             } else {
-                // If replay term more than current term, we should convert ourselves be a follower.
-                if reply.term > current_term {
-                    self.convert_to_follower(reply.term);
-                } else {
-                    // It means follower's log conflict with leader log.
-                    // So we need to fast back up.
-                    let mut prev_index = append_logs_args.prev_log_index as i64; // Get the previous log index.
+                // It means follower's log conflict with leader log.
+                // So we need to fast back up.
+                let mut prev_index = append_logs_args.prev_log_index as i64; // Get the previous log index.
 
-                    // We will back up to a index which is first index of previous log term.
-                    while prev_index >= 0
-                        && self.logs[prev_index as usize].term == append_logs_args.prev_log_term
-                    {
-                        prev_index -= 1;
-                    }
-                    self.next_indexes[peer_id] = (prev_index + 1) as usize
+                // We will back up to a index which is first index of previous log term.
+                while prev_index >= 0
+                    && self.logs[prev_index as usize].term == append_logs_args.prev_log_term
+                {
+                    prev_index -= 1;
                 }
+                self.next_indexes[peer_id] = (prev_index + 1) as usize
             }
         }
     }
