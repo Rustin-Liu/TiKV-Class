@@ -6,5 +6,6 @@ pub mod node;
 pub mod persister;
 pub mod raft_peer;
 pub mod raft_server;
+pub mod rand;
 #[cfg(test)]
 mod tests;

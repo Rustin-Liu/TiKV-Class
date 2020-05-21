@@ -1,12 +1,13 @@
 use crate::raft::defs::Action;
 use crate::raft::raft_peer::RaftPeer;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
-use rand::Rng;
+use rand::{thread_rng, Rng};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::{Duration, Instant};
 use tokio::task;
+use tokio::time;
+use tokio::time::delay_for;
 
 const APPLY_INTERVAL: u64 = 50;
 
@@ -28,15 +29,16 @@ impl RaftSever {
         let dead_for_election_timer = Arc::clone(&self.raft.dead);
         let dead_for_apply_timer = Arc::clone(&self.raft.dead);
         let last_receive_time = Arc::clone(&self.last_receive_time);
-        task::spawn(async {
-            RaftSever::election_timer(
-                election_timer_sender,
-                is_leader_for_server,
-                dead_for_election_timer,
-                last_receive_time,
-            )
-        });
-        task::spawn(async { RaftSever::apply_timer(apply_timer_sender, dead_for_apply_timer) });
+        task::spawn(RaftSever::election_timer(
+            election_timer_sender,
+            is_leader_for_server,
+            dead_for_election_timer,
+            last_receive_time,
+        ));
+        task::spawn(RaftSever::apply_timer(
+            apply_timer_sender,
+            dead_for_apply_timer,
+        ));
         let mut msg_receiver = self.action_receiver.lock().unwrap();
         loop {
             if self.raft.dead.load(Ordering::SeqCst) {
@@ -75,9 +77,7 @@ impl RaftSever {
                             let is_leader = Arc::clone(&self.raft.is_leader);
                             if success {
                                 self.raft.append_logs_to_peers(sender.clone());
-                                task::spawn(
-                                    async move { RaftSever::append_timer(sender, is_leader) },
-                                );
+                                task::spawn(RaftSever::append_timer(sender, is_leader));
                             }
                         }
                         Action::Start(command_buf, sender) => {
@@ -105,17 +105,16 @@ impl RaftSever {
         }
     }
 
-    fn election_timer(
+    async fn election_timer(
         action_sender: UnboundedSender<Action>,
         is_leader: Arc<AtomicBool>,
         dead: Arc<AtomicBool>,
         last_receive_time: Arc<Mutex<Instant>>,
     ) {
-        let mut rng = rand::thread_rng();
         loop {
             let start_time = Instant::now();
-            let election_timeout = rng.gen_range(0, 300);
-            thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL + election_timeout));
+            let election_timeout = thread_rng().gen_range(0, 300);
+            delay_for(Duration::from_millis(HEARTBEAT_INTERVAL + election_timeout)).await;
             if dead.load(Ordering::SeqCst) {
                 return;
             }
@@ -135,9 +134,10 @@ impl RaftSever {
         }
     }
 
-    fn apply_timer(action_sender: UnboundedSender<Action>, dead: Arc<AtomicBool>) {
+    async fn apply_timer(action_sender: UnboundedSender<Action>, dead: Arc<AtomicBool>) {
+        let mut interval = time::interval(Duration::from_millis(APPLY_INTERVAL));
         loop {
-            thread::sleep(Duration::from_millis(APPLY_INTERVAL));
+            interval.tick().await;
             if dead.load(Ordering::SeqCst) {
                 return;
             }
@@ -151,8 +151,10 @@ impl RaftSever {
         }
     }
 
-    fn append_timer(action_sender: UnboundedSender<Action>, is_leader: Arc<AtomicBool>) {
+    async fn append_timer(action_sender: UnboundedSender<Action>, is_leader: Arc<AtomicBool>) {
+        let mut interval = time::interval(Duration::from_millis(HEARTBEAT_INTERVAL));
         loop {
+            interval.tick().await;
             if is_leader.load(Ordering::SeqCst) && !action_sender.is_closed() {
                 action_sender
                     .clone()
@@ -160,7 +162,6 @@ impl RaftSever {
                     .map_err(|_| ())
                     .unwrap_or_else(|_| ());
             }
-            thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL));
         }
     }
 }
