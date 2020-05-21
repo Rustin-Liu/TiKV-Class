@@ -1,15 +1,16 @@
-use labrpc::Result;
-
 use crate::proto::raftpb::*;
 use crate::raft::defs::{Action, State};
+use crate::raft::errors;
+use crate::raft::errors::Error;
 use crate::raft::raft_peer::RaftPeer;
 use crate::raft::raft_server::RaftSever;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
-use futures::channel::oneshot::channel;
+use futures::channel::oneshot::{channel, Canceled};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
+use tokio::runtime::Runtime;
 
 // Choose concurrency paradigm.
 //
@@ -38,28 +39,17 @@ impl Node {
     pub fn new(raft: RaftPeer) -> Node {
         let (sender, receiver) = unbounded::<Action>();
         let node_sender = sender.clone();
-        let election_timer_sender = sender.clone();
         let last_receive_time = Arc::new(Mutex::new(Instant::now()));
         let current_term = Arc::clone(&raft.current_term);
-        let is_leader_for_server = Arc::clone(&raft.is_leader);
         let is_leader_for_node = Arc::clone(&raft.is_leader);
-        let dead_for_server = Arc::clone(&raft.dead);
         let dead_for_node = Arc::clone(&raft.dead);
         let mut server = RaftSever {
             raft,
             action_sender: sender,
             action_receiver: Arc::new(Mutex::new(receiver)),
-            last_receive_time: Arc::clone(&last_receive_time),
+            last_receive_time,
         };
         thread::spawn(move || server.action_handler());
-        thread::spawn(|| {
-            RaftSever::election_timer(
-                election_timer_sender,
-                is_leader_for_server,
-                dead_for_server,
-                last_receive_time,
-            )
-        });
         Node {
             msg_sender: node_sender,
             current_term,
@@ -80,14 +70,30 @@ impl Node {
     /// at if it's ever committed. the second is the current term.
     ///
     /// This method must return without blocking on the raft.
-    pub fn start<M>(&self, command: &M) -> Result<(u64, u64)>
+    pub fn start<M>(&self, command: &M) -> errors::Result<(u64, u64)>
     where
         M: labcodec::Message,
     {
-        // Your code here.
-        // Example:
-        // self.raft.start(command)
-        crate::your_code_here(command)
+        let mut command_buf = vec![];
+        labcodec::encode(command, &mut command_buf).map_err(Error::Encode)?;
+        let (sender, receiver) = channel();
+        if !self.msg_sender.is_closed() {
+            self.msg_sender
+                .clone()
+                .unbounded_send(Action::Start(command_buf, sender))
+                .map_err(|_| ())
+                .unwrap_or_else(|_| ());
+        } else {
+            return Err(Error::NotLeader);
+        }
+        let mut runtime = Runtime::new().unwrap();
+        if let Ok(res) = runtime.block_on(async {
+            return receiver.await;
+        }) {
+            res
+        } else {
+            Err(Error::NotLeader)
+        }
     }
 
     /// The current term of this peer.
@@ -123,7 +129,7 @@ impl Node {
 
 #[async_trait::async_trait]
 impl RaftService for Node {
-    async fn request_vote(&self, args: RequestVoteArgs) -> Result<RequestVoteReply> {
+    async fn request_vote(&self, args: RequestVoteArgs) -> labrpc::Result<RequestVoteReply> {
         let (sender, receiver) = channel();
         if !self.msg_sender.is_closed() {
             self.msg_sender
@@ -132,9 +138,12 @@ impl RaftService for Node {
                 .map_err(|_| ())
                 .unwrap_or_else(|_| ());
         }
-        Ok(receiver.await.unwrap())
+        match receiver.await {
+            Ok(reply) => Ok(reply),
+            Err(_) => Err(labrpc::Error::Recv(Canceled)),
+        }
     }
-    async fn append_logs(&self, args: AppendLogsArgs) -> Result<AppendLogsReply> {
+    async fn append_logs(&self, args: AppendLogsArgs) -> labrpc::Result<AppendLogsReply> {
         let (sender, receiver) = channel();
         if !self.msg_sender.is_closed() {
             self.msg_sender
@@ -143,6 +152,9 @@ impl RaftService for Node {
                 .map_err(|_| ())
                 .unwrap_or_else(|_| ());
         }
-        Ok(receiver.await.unwrap())
+        match receiver.await {
+            Ok(reply) => Ok(reply),
+            Err(_) => Err(labrpc::Error::Recv(Canceled)),
+        }
     }
 }

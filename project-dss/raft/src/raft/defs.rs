@@ -1,4 +1,5 @@
 use crate::proto::raftpb::*;
+use crate::raft::errors::Result;
 use futures::channel::oneshot::Sender;
 
 pub struct ApplyMsg {
@@ -42,4 +43,8 @@ pub enum Action {
     RequestVote(RequestVoteArgs, Sender<RequestVoteReply>),
     AppendLogs(AppendLogsArgs, Sender<AppendLogsReply>),
     KickOffElection,
+    Start(Vec<u8>, Sender<Result<(u64, u64)>>),
+    Apply,
+    StartAppendLogs,
+    AppendLogsResult(AppendLogsReply),
 }

@@ -10,9 +10,10 @@ on:
 
 jobs:
   build:
-
-    runs-on: ubuntu-latest
-
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [self-hosted, ubuntu-latest]
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -24,3 +25,4 @@ jobs:
         run: |
           make test_others
           make test_2a
+          make test_2b
