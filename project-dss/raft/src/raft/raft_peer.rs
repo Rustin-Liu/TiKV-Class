@@ -5,6 +5,7 @@ use crate::raft::defs::{Action, ApplyMsg, Role};
 use crate::raft::errors::Error::Others;
 use crate::raft::errors::{Error, Result};
 use crate::raft::persister::Persister;
+use crate::raft::PRC_TIMEOUT;
 use futures::channel::oneshot::{channel, Receiver};
 use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryFutureExt};
@@ -13,8 +14,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::timeout;
-
-const PRC_TIMEOUT: u64 = 8;
 
 // A single Raft peer.
 pub struct RaftPeer {

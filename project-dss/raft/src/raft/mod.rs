@@ -6,6 +6,11 @@ pub mod node;
 pub mod persister;
 pub mod raft_peer;
 pub mod raft_server;
-pub mod rand;
 #[cfg(test)]
 mod tests;
+
+pub const APPLY_INTERVAL: u64 = 50;
+
+pub const HEARTBEAT_INTERVAL: u64 = 50;
+
+pub const PRC_TIMEOUT: u64 = 5;

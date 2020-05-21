@@ -1,5 +1,6 @@
 use crate::raft::defs::Action;
 use crate::raft::raft_peer::RaftPeer;
+use crate::raft::{APPLY_INTERVAL, HEARTBEAT_INTERVAL};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use rand::{thread_rng, Rng};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -8,10 +9,6 @@ use std::time::{Duration, Instant};
 use tokio::task;
 use tokio::time;
 use tokio::time::delay_for;
-
-const APPLY_INTERVAL: u64 = 50;
-
-const HEARTBEAT_INTERVAL: u64 = 50;
 
 pub struct RaftSever {
     pub raft: RaftPeer,
