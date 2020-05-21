@@ -13,4 +13,4 @@ pub const APPLY_INTERVAL: u64 = 50;
 
 pub const HEARTBEAT_INTERVAL: u64 = 50;
 
-pub const PRC_TIMEOUT: u64 = 5;
+pub const PRC_TIMEOUT: u64 = 1;
