@@ -13,6 +13,7 @@ use std::cmp;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::task;
 use tokio::time::timeout;
 
 // A single Raft peer.
@@ -372,18 +373,16 @@ impl RaftPeer {
             .filter(|(peer_id, _)| *peer_id != me)
             .map(|(peer_id, _)| self.append_logs_to_peer(peer_id))
             .collect::<FuturesUnordered<Receiver<Result<AppendLogsReply>>>>();
-        tokio::spawn(async move {
-            for _ in 0..futures.len() {
-                if let Some(reply) = futures.next().await {
+        task::spawn(async move {
+            while let Some(reply) = futures.next().await {
+                if let Ok(reply) = reply {
                     if let Ok(reply) = reply {
-                        if let Ok(reply) = reply {
-                            if !action_sender.is_closed() {
-                                action_sender
-                                    .clone()
-                                    .unbounded_send(Action::AppendLogsResult(reply))
-                                    .map_err(|_| ())
-                                    .unwrap_or_else(|_| ());
-                            }
+                        if !action_sender.is_closed() {
+                            action_sender
+                                .clone()
+                                .unbounded_send(Action::AppendLogsResult(reply))
+                                .map_err(|_| ())
+                                .unwrap_or_else(|_| ());
                         }
                     }
                 }
