@@ -11,8 +11,9 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
-    matrix:
-      os: [self-hosted, ubuntu-latest]
+    strategy:
+      matrix:
+        os: [self-hosted, ubuntu-latest]
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
