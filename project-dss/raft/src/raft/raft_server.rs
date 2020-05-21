@@ -11,7 +11,7 @@ use tokio::time::delay_for;
 
 const APPLY_INTERVAL: u64 = 50;
 
-const HEARTBEAT_INTERVAL: u64 = 35;
+const HEARTBEAT_INTERVAL: u64 = 50;
 
 pub struct RaftSever {
     pub raft: RaftPeer,
