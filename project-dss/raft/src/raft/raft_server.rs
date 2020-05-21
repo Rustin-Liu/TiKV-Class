@@ -47,7 +47,7 @@ impl RaftSever {
                     Some(msg) => match msg {
                         Action::RequestVote(args, sender) => {
                             debug!("{}: Got a request vote action", self.raft.me);
-                            let reply = self.raft.request_vote_handler(&args);
+                            let reply = self.raft.handle_request_vote(&args);
                             let mut last_update_time = self.last_receive_time.lock().unwrap();
                             *last_update_time = Instant::now();
                             sender.send(reply).unwrap_or_else(|_| {
@@ -59,7 +59,7 @@ impl RaftSever {
                                 "{}: Got a append logs from {}",
                                 self.raft.me, args.leader_id
                             );
-                            let reply = self.raft.append_logs_handler(&args);
+                            let reply = self.raft.handle_append_logs(&args);
                             let mut last_update_time = self.last_receive_time.lock().unwrap();
                             *last_update_time = Instant::now();
                             sender.send(reply).unwrap_or_else(|_| {

@@ -248,7 +248,7 @@ impl RaftPeer {
     }
 
     /// Handle the vote request.
-    pub fn request_vote_handler(&mut self, args: &RequestVoteArgs) -> RequestVoteReply {
+    pub fn handle_request_vote(&mut self, args: &RequestVoteArgs) -> RequestVoteReply {
         let mut reply = RequestVoteReply::default();
         let current_term = self.current_term.load(Ordering::SeqCst);
 
@@ -273,8 +273,8 @@ impl RaftPeer {
         reply
     }
 
-    /// Handler append logs request.
-    pub fn append_logs_handler(&mut self, args: &AppendLogsArgs) -> AppendLogsReply {
+    /// Handle append logs request.
+    pub fn handle_append_logs(&mut self, args: &AppendLogsArgs) -> AppendLogsReply {
         let me = self.me;
         let current_term = self.current_term.load(Ordering::SeqCst);
         let mut reply = AppendLogsReply {
@@ -365,19 +365,13 @@ impl RaftPeer {
     /// Append logs to peers.
     pub fn append_logs_to_peers(&mut self, action_sender: UnboundedSender<Action>) {
         let me = self.me;
-        let mut futures: FuturesUnordered<Receiver<Result<AppendLogsReply>>> =
-            FuturesUnordered::new();
-
-        let result_receiver: Vec<Receiver<Result<AppendLogsReply>>> = self
+        let mut futures: FuturesUnordered<Receiver<Result<AppendLogsReply>>> = self
             .peers
             .iter()
             .enumerate()
             .filter(|(peer_id, _)| *peer_id != me)
             .map(|(peer_id, _)| self.append_logs_to_peer(peer_id))
-            .collect();
-        for receiver in result_receiver {
-            futures.push(receiver);
-        }
+            .collect::<FuturesUnordered<Receiver<Result<AppendLogsReply>>>>();
         tokio::spawn(async move {
             for _ in 0..futures.len() {
                 if let Some(reply) = futures.next().await {
@@ -397,6 +391,7 @@ impl RaftPeer {
         });
     }
 
+    /// Append logs to peer.
     fn append_logs_to_peer(&self, peer_id: usize) -> Receiver<Result<AppendLogsReply>> {
         let me = self.me;
         assert_ne!(peer_id, me);
@@ -416,8 +411,10 @@ impl RaftPeer {
         self.send_append_log(peer_id, append_logs_args)
     }
 
+    /// Handle append logs rpc reply.
     pub fn handle_append_logs_reply(&mut self, reply: AppendLogsReply) {
         let current_term = self.current_term.load(Ordering::SeqCst);
+        // If we already not a leader or the reply too late, we just ignore it.
         if self.role != Role::Leader || current_term != reply.append_term {
             return;
         }
