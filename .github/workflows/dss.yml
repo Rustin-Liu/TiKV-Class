@@ -26,3 +26,4 @@ jobs:
           make test_others
           make test_2a
           make test_2b
+          make test_2c
