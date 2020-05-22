@@ -69,13 +69,15 @@ impl RaftSever {
                         Action::KickOffElection => {
                             debug!("{}: Got a kick off election action", self.raft.me);
                             self.raft.convert_to_candidate();
-                            let success = self.raft.kick_off_election().await;
                             let sender = self.action_sender.clone();
+                            self.raft.kick_off_election(sender.clone());
+                        }
+                        Action::ElectionSuccess => {
+                            self.raft.convert_to_leader();
                             let is_leader = Arc::clone(&self.raft.is_leader);
-                            if success {
-                                self.raft.append_logs_to_peers(sender.clone());
-                                task::spawn(RaftSever::append_timer(sender, is_leader));
-                            }
+                            let sender = self.action_sender.clone();
+                            self.raft.append_logs_to_peers(sender.clone());
+                            task::spawn(RaftSever::append_timer(sender, is_leader));
                         }
                         Action::Start(command_buf, sender) => {
                             debug!("{}: Got a start action", self.raft.me);
@@ -110,8 +112,8 @@ impl RaftSever {
     ) {
         loop {
             let start_time = Instant::now();
-            let election_timeout = thread_rng().gen_range(100, 300);
-            delay_for(Duration::from_millis(election_timeout)).await;
+            let election_timeout = thread_rng().gen_range(0, 300);
+            delay_for(Duration::from_millis(200 + election_timeout)).await;
             if dead.load(Ordering::SeqCst) {
                 return;
             }

@@ -2,19 +2,15 @@ use futures::channel::mpsc::UnboundedSender;
 
 use crate::proto::raftpb::*;
 use crate::raft::defs::{Action, ApplyMsg, Role};
-use crate::raft::errors::Error::Others;
 use crate::raft::errors::{Error, Result};
 use crate::raft::persister::Persister;
-use crate::raft::PRC_TIMEOUT;
 use futures::channel::oneshot::{channel, Receiver};
 use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryFutureExt};
 use std::cmp;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::task;
-use tokio::time::timeout;
 
 // A single Raft peer.
 pub struct RaftPeer {
@@ -218,21 +214,21 @@ impl RaftPeer {
     }
 
     // Send request vote to peer.
-    async fn send_request_vote(
+    fn send_request_vote(
         &self,
         peer_id: usize,
-        args: &RequestVoteArgs,
-    ) -> Result<RequestVoteReply> {
+        args: RequestVoteArgs,
+    ) -> Receiver<Result<RequestVoteReply>> {
+        let (sender, receiver) = channel::<Result<RequestVoteReply>>();
         let peer = &self.peers[peer_id];
-        // We need to set timeout to prevent other requests from being blocked.
-        let result = timeout(Duration::from_micros(PRC_TIMEOUT), peer.request_vote(args)).await;
-        match result {
-            Ok(result) => match result {
-                Ok(result) => Ok(result),
-                Err(_) => Err(Others(String::from("Request vote failed"))),
-            },
-            Err(_) => Err(Others(String::from("Request vote timeout"))),
-        }
+        let client = peer.clone();
+        peer.spawn(async move {
+            let res = client.request_vote(&args).map_err(Error::Rpc).await;
+            if !sender.is_canceled() {
+                sender.send(res).unwrap_or_else(|_| ());
+            }
+        });
+        receiver
     }
 
     // Send append log to peer.
@@ -334,7 +330,7 @@ impl RaftPeer {
     /// Kick off a election.
     ///
     /// Return is become leader.
-    pub async fn kick_off_election(&mut self) -> bool {
+    pub fn kick_off_election(&mut self, action_sender: UnboundedSender<Action>) {
         self.persist();
         let me = self.me;
         let current_term = self.current_term.load(Ordering::SeqCst);
@@ -350,28 +346,33 @@ impl RaftPeer {
 
         // We default vote to ourselves.
         let mut vote_count = 1 as usize;
+        let mut futures: FuturesUnordered<Receiver<Result<RequestVoteReply>>> = self
+            .peers
+            .iter()
+            .enumerate()
+            .filter(|(peer_id, _)| *peer_id != me)
+            .map(|(peer_id, _)| self.send_request_vote(peer_id, request_vote_args.clone()))
+            .collect::<FuturesUnordered<Receiver<Result<RequestVoteReply>>>>();
         let peers_len = self.peers.len();
-        let mut success = false;
 
-        for peer_id in 0..self.peers.len() {
-            if peer_id != me && !success && self.role == Role::Candidate {
-                let reply = self.send_request_vote(peer_id, &request_vote_args).await;
+        task::spawn(async move {
+            while let Some(reply) = futures.next().await {
                 if let Ok(reply) = reply {
-                    if reply.vote_granted {
-                        info!("{}: Got a granted from {}", self.me, peer_id);
-                        vote_count += 1;
-                        if vote_count * 2 > peers_len {
-                            success = true;
+                    if let Ok(reply) = reply {
+                        if reply.vote_granted {
+                            vote_count += 1;
+                            if vote_count * 2 > peers_len && !action_sender.is_closed() {
+                                action_sender
+                                    .clone()
+                                    .unbounded_send(Action::ElectionSuccess)
+                                    .map_err(|_| ())
+                                    .unwrap_or_else(|_| ());
+                            }
                         }
                     }
                 }
             }
-        }
-        if success {
-            self.convert_to_leader();
-            info!("{}: became leader on {}", self.me, current_term);
-        }
-        success
+        });
     }
 
     /// Append logs to peers.
