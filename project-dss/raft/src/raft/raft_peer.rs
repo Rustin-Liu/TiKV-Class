@@ -11,7 +11,7 @@ use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryFutureExt};
 use std::cmp;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::task;
 use tokio::time::timeout;
@@ -21,7 +21,7 @@ pub struct RaftPeer {
     // RPC end points of all peers
     pub peers: Vec<RaftClient>,
     // Object to hold this peer's persisted state
-    pub persister: Mutex<Box<dyn Persister>>,
+    pub persister: Box<dyn Persister>,
     // This peer's index into peers[]
     pub me: usize,
     // Current term.
@@ -67,7 +67,7 @@ impl RaftPeer {
         let peers_len = peers.len();
         let mut rf = RaftPeer {
             peers,
-            persister: Mutex::new(persister),
+            persister,
             me,
             current_term: Arc::new(AtomicU64::new(0)),
             is_leader: Arc::new(AtomicBool::new(false)),
@@ -125,30 +125,35 @@ impl RaftPeer {
     /// where it can later be retrieved after a crash and restart.
     /// see paper's Figure 2 for a description of what should be persistent.
     fn persist(&mut self) {
-        // Your code here (2C).
-        // Example:
-        // labcodec::encode(&self.xxx, &mut data).unwrap();
-        // labcodec::encode(&self.yyy, &mut data).unwrap();
-        // self.persister.save_raft_state(data);
+        let current_term = self.current_term.load(Ordering::SeqCst);
+        let state = RaftState {
+            current_term,
+            voted_for: self
+                .voted_for
+                .clone()
+                .map(|n| n as u64)
+                .map(raft_state::VotedFor::Voted),
+            logs: self.logs.clone(),
+        };
+        let mut data: Vec<u8> = vec![];
+        labcodec::encode(&state, &mut data).unwrap();
+        self.persister.save_raft_state(data);
     }
 
     /// Restore previously persisted state.
     fn restore(&mut self, data: &[u8]) {
         if data.is_empty() {
-            // bootstrap without any state?
             return;
         }
-        // Your code here (2C).
-        // Example:
-        // match labcodec::decode(data) {
-        //     Ok(o) => {
-        //         self.xxx = o.xxx;
-        //         self.yyy = o.yyy;
-        //     }
-        //     Err(e) => {
-        //         panic!("{:?}", e);
-        //     }
-        // }
+        if let Ok(raft_state) = labcodec::decode(data) {
+            let raft_state: RaftState = raft_state;
+            self.current_term
+                .store(raft_state.current_term, Ordering::SeqCst);
+            self.voted_for = raft_state
+                .voted_for
+                .map(|raft_state::VotedFor::Voted(n)| n as usize);
+            self.logs = raft_state.logs;
+        }
     }
 
     /// The service using Raft (e.g. a k/v server) wants to start
@@ -220,7 +225,7 @@ impl RaftPeer {
     ) -> Result<RequestVoteReply> {
         let peer = &self.peers[peer_id];
         // We need to set timeout to prevent other requests from being blocked.
-        let result = timeout(Duration::from_millis(PRC_TIMEOUT), peer.request_vote(args)).await;
+        let result = timeout(Duration::from_micros(PRC_TIMEOUT), peer.request_vote(args)).await;
         match result {
             Ok(result) => match result {
                 Ok(result) => Ok(result),
@@ -264,11 +269,14 @@ impl RaftPeer {
         // If we get a term less than ourselves, we immediately refuse to vote for this candidate.
         if args.term < current_term {
             reply.vote_granted = false;
-        } else if args.term >= current_term {
-            self.convert_to_follower(args.term);
+        } else {
+            if args.term > current_term {
+                self.convert_to_follower(args.term);
+            }
             if self.voted_for.is_none() && is_more_update {
                 self.voted_for = Some(args.candidate_id as usize);
                 reply.vote_granted = true;
+                self.persist();
             }
         }
         reply
@@ -305,6 +313,7 @@ impl RaftPeer {
             // If our logs length longer than leader log, we need to delete the useless log.
             if args.prev_log_index < self.logs.len() as u64 {
                 self.logs.truncate(args.prev_log_index as usize);
+                self.persist();
             }
             return reply;
         }
@@ -312,6 +321,7 @@ impl RaftPeer {
         // We just append the entries to our log.
         self.logs.truncate(args.prev_log_index as usize + 1);
         self.logs.extend_from_slice(&args.entries);
+        self.persist();
         // Update the committed index.
         if args.leader_committed_index > self.committed_index as u64 {
             self.committed_index =
@@ -325,6 +335,7 @@ impl RaftPeer {
     ///
     /// Return is become leader.
     pub async fn kick_off_election(&mut self) -> bool {
+        self.persist();
         let me = self.me;
         let current_term = self.current_term.load(Ordering::SeqCst);
 
@@ -435,19 +446,20 @@ impl RaftPeer {
                 let mut prev_index = reply.prev_log_index as i64; // Get the previous log index.
 
                 // We will back up to a index which is first index of previous log term.
-                while prev_index >= 0 && self.logs[prev_index as usize].term == reply.prev_log_term
-                {
+                while prev_index > 0 && self.logs[prev_index as usize].term == reply.prev_log_term {
                     prev_index -= 1;
                 }
                 self.next_indexes[reply.peer_id as usize] = (prev_index + 1) as usize
             }
         }
+        self.persist();
     }
 
     /// Apply the msg.
     pub fn apply(&mut self) {
         while self.last_applied_index < self.committed_index {
             self.last_applied_index += 1;
+            self.persist();
             let msg = ApplyMsg {
                 command_valid: true,
                 command: self.logs[self.last_applied_index].clone().command_buf,
@@ -455,14 +467,5 @@ impl RaftPeer {
             };
             self.apply_ch.unbounded_send(msg).unwrap_or_else(|_| ());
         }
-    }
-}
-
-impl RaftPeer {
-    /// Only for suppressing deadcode warnings.
-    #[doc(hidden)]
-    pub fn __suppress_deadcode(&mut self) {
-        self.persist();
-        let _ = &self.persister;
     }
 }

@@ -110,7 +110,7 @@ impl RaftSever {
     ) {
         loop {
             let start_time = Instant::now();
-            let election_timeout = thread_rng().gen_range(80, 300);
+            let election_timeout = thread_rng().gen_range(100, 300);
             delay_for(Duration::from_millis(election_timeout)).await;
             if dead.load(Ordering::SeqCst) {
                 return;

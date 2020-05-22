@@ -38,3 +38,9 @@ message LogEntry {
   uint64 index = 2;
   bytes command_buf = 3;
 }
+
+message RaftState{
+  uint64 current_term =1;
+  oneof voted_for {uint64 voted = 2;}
+  repeated LogEntry logs = 3;
+}
