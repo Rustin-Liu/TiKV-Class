@@ -12,20 +12,6 @@ use std::thread;
 use std::time::Instant;
 use tokio::runtime::Runtime;
 
-// Choose concurrency paradigm.
-//
-// You can either drive the raft state machine by the rpc framework,
-//
-// ```rust
-// struct Node { raft: Arc<Mutex<Raft>> }
-// ```
-//
-// or spawn a new thread runs the raft state machine and communicate via
-// a channel.
-//
-// ```rust
-// struct Node { sender: Sender<Msg> }
-// ```
 #[derive(Clone)]
 pub struct Node {
     msg_sender: UnboundedSender<Action>,
@@ -74,6 +60,10 @@ impl Node {
     where
         M: labcodec::Message,
     {
+        if !self.is_leader() {
+            return Err(Error::NotLeader);
+        }
+
         let mut command_buf = vec![];
         labcodec::encode(command, &mut command_buf).map_err(Error::Encode)?;
         let (sender, receiver) = channel();
@@ -140,7 +130,10 @@ impl RaftService for Node {
         }
         match receiver.await {
             Ok(reply) => Ok(reply),
-            Err(_) => Err(labrpc::Error::Recv(Canceled)),
+            Err(_) => {
+                info!("fucked");
+                Err(labrpc::Error::Recv(Canceled))
+            }
         }
     }
     async fn append_logs(&self, args: AppendLogsArgs) -> labrpc::Result<AppendLogsReply> {

@@ -330,7 +330,6 @@ impl RaftPeer {
     ///
     /// Return is become leader.
     pub fn kick_off_election(&mut self, action_sender: UnboundedSender<Action>) {
-        self.persist();
         let me = self.me;
         let current_term = self.current_term.load(Ordering::SeqCst);
 
@@ -353,7 +352,6 @@ impl RaftPeer {
             .map(|(peer_id, _)| self.send_request_vote(peer_id, request_vote_args.clone()))
             .collect::<FuturesUnordered<Receiver<Result<RequestVoteReply>>>>();
         let peers_len = self.peers.len();
-
         tokio::spawn(async move {
             while let Some(reply) = futures.next().await {
                 if let Ok(reply) = reply {

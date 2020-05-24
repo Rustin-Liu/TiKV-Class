@@ -5,9 +5,9 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use rand::{thread_rng, Rng};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 use tokio::time;
-use tokio::time::delay_for;
 
 pub struct RaftSever {
     pub raft: RaftPeer,
@@ -25,12 +25,14 @@ impl RaftSever {
         let dead_for_election_timer = Arc::clone(&self.raft.dead);
         let dead_for_apply_timer = Arc::clone(&self.raft.dead);
         let last_receive_time = Arc::clone(&self.last_receive_time);
-        tokio::spawn(RaftSever::election_timer(
-            election_timer_sender,
-            is_leader_for_server,
-            dead_for_election_timer,
-            last_receive_time,
-        ));
+        thread::spawn(|| {
+            RaftSever::election_timer(
+                election_timer_sender,
+                is_leader_for_server,
+                dead_for_election_timer,
+                last_receive_time,
+            )
+        });
         tokio::spawn(RaftSever::apply_timer(
             apply_timer_sender,
             dead_for_apply_timer,
@@ -45,7 +47,7 @@ impl RaftSever {
                 match msg {
                     Some(msg) => match msg {
                         Action::RequestVote(args, sender) => {
-                            debug!("{}: Got a request vote action", self.raft.me);
+                            info!("{}: Got a request vote action", self.raft.me);
                             let reply = self.raft.handle_request_vote(&args);
                             let mut last_update_time = self.last_receive_time.lock().unwrap();
                             *last_update_time = Instant::now();
@@ -54,10 +56,6 @@ impl RaftSever {
                             })
                         }
                         Action::AppendLogs(args, sender) => {
-                            debug!(
-                                "{}: Got a append logs from {}",
-                                self.raft.me, args.leader_id
-                            );
                             let reply = self.raft.handle_append_logs(&args);
                             let mut last_update_time = self.last_receive_time.lock().unwrap();
                             *last_update_time = Instant::now();
@@ -66,12 +64,13 @@ impl RaftSever {
                             })
                         }
                         Action::KickOffElection => {
-                            debug!("{}: Got a kick off election action", self.raft.me);
+                            info!("{}: Got a kick off election action", self.raft.me);
                             self.raft.convert_to_candidate();
                             let sender = self.action_sender.clone();
                             self.raft.kick_off_election(sender.clone());
                         }
                         Action::ElectionSuccess => {
+                            info!("{}: Election success", self.raft.me);
                             self.raft.convert_to_leader();
                             let is_leader = Arc::clone(&self.raft.is_leader);
                             let sender = self.action_sender.clone();
@@ -79,16 +78,13 @@ impl RaftSever {
                             tokio::spawn(RaftSever::append_timer(sender, is_leader));
                         }
                         Action::Start(command_buf, sender) => {
-                            debug!("{}: Got a start action", self.raft.me);
+                            info!("{}: Got a start action", self.raft.me);
                             let result = self.raft.start(command_buf);
                             sender.send(result).unwrap_or_else(|_| {
                                 info!("PRC ERROR {}: send Start result error", self.raft.me);
                             })
                         }
-                        Action::Apply => {
-                            debug!("{}: Got a apply action", self.raft.me);
-                            self.raft.apply()
-                        }
+                        Action::Apply => self.raft.apply(),
                         Action::StartAppendLogs => {
                             let sender = self.action_sender.clone();
                             self.raft.append_logs_to_peers(sender);
@@ -103,16 +99,16 @@ impl RaftSever {
         }
     }
 
-    async fn election_timer(
+    fn election_timer(
         action_sender: UnboundedSender<Action>,
         is_leader: Arc<AtomicBool>,
         dead: Arc<AtomicBool>,
         last_receive_time: Arc<Mutex<Instant>>,
     ) {
+        let mut rng = thread_rng();
         loop {
             let start_time = Instant::now();
-            let election_timeout = thread_rng().gen_range(0, 300);
-            delay_for(Duration::from_millis(200 + election_timeout)).await;
+            thread::sleep(Duration::from_millis(200 + rng.gen_range(0, 300)));
             if dead.load(Ordering::SeqCst) {
                 return;
             }
