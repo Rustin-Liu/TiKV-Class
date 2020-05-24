@@ -10,7 +10,6 @@ use futures::{StreamExt, TryFutureExt};
 use std::cmp;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::task;
 
 // A single Raft peer.
 pub struct RaftPeer {
@@ -355,7 +354,7 @@ impl RaftPeer {
             .collect::<FuturesUnordered<Receiver<Result<RequestVoteReply>>>>();
         let peers_len = self.peers.len();
 
-        task::spawn(async move {
+        tokio::spawn(async move {
             while let Some(reply) = futures.next().await {
                 if let Ok(reply) = reply {
                     if let Ok(reply) = reply {
@@ -385,7 +384,7 @@ impl RaftPeer {
             .filter(|(peer_id, _)| *peer_id != me)
             .map(|(peer_id, _)| self.append_logs_to_peer(peer_id))
             .collect::<FuturesUnordered<Receiver<Result<AppendLogsReply>>>>();
-        task::spawn(async move {
+        tokio::spawn(async move {
             while let Some(reply) = futures.next().await {
                 if let Ok(reply) = reply {
                     if let Ok(reply) = reply {
