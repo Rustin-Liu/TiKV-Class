@@ -5,12 +5,10 @@ use crate::raft::defs::{Action, ApplyMsg, Role};
 use crate::raft::errors::{Error, Result};
 use crate::raft::persister::Persister;
 use futures::channel::oneshot::{channel, Receiver};
-use futures::stream::FuturesUnordered;
-use futures::{StreamExt, TryFutureExt};
+use futures::TryFutureExt;
 use std::cmp;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::task;
 
 // A single Raft peer.
 pub struct RaftPeer {
@@ -344,30 +342,35 @@ impl RaftPeer {
         };
 
         // We default vote to ourselves.
-        let mut vote_count = 1 as usize;
-        let mut futures: FuturesUnordered<Receiver<Result<RequestVoteReply>>> = self
+        let vote_count: Arc<AtomicU64> = Arc::new(AtomicU64::new(1));
+        let receivers: Vec<Receiver<Result<RequestVoteReply>>> = self
             .peers
             .iter()
             .enumerate()
             .filter(|(peer_id, _)| *peer_id != me)
             .map(|(peer_id, _)| self.send_request_vote(peer_id, request_vote_args.clone()))
-            .collect::<FuturesUnordered<Receiver<Result<RequestVoteReply>>>>();
+            .collect::<Vec<Receiver<Result<RequestVoteReply>>>>();
         let peers_len = self.peers.len();
-        task::spawn(async move {
-            while let Some(reply) = futures.next().await {
+
+        for receiver in receivers {
+            let count = Arc::clone(&vote_count);
+            let sender = action_sender.clone();
+            tokio::spawn(async move {
+                let reply = receiver.await;
                 if let Ok(reply) = reply {
                     if let Ok(reply) = reply {
                         if reply.vote_granted {
-                            vote_count += 1;
-                            if vote_count * 2 > peers_len && !action_sender.is_closed() {
-                                action_sender
-                                    .clone()
+                            count.fetch_add(1, Ordering::SeqCst);
+                            if count.load(Ordering::SeqCst) * 2 > peers_len as u64
+                                && !sender.is_closed()
+                            {
+                                sender
                                     .unbounded_send(Action::ElectionSuccess)
                                     .map_err(|_| ())
                                     .unwrap_or_else(|_| ());
                             }
-                        } else if !action_sender.is_closed() {
-                            action_sender
+                        } else if !sender.is_closed() {
+                            sender
                                 .clone()
                                 .unbounded_send(Action::ElectionFailed(reply))
                                 .map_err(|_| ())
@@ -375,26 +378,29 @@ impl RaftPeer {
                         }
                     }
                 }
-            }
-        });
+            });
+        }
     }
 
     /// Append logs to peers.
     pub fn append_logs_to_peers(&mut self, action_sender: UnboundedSender<Action>) {
         let me = self.me;
-        let mut futures: FuturesUnordered<Receiver<Result<AppendLogsReply>>> = self
+        let receivers: Vec<Receiver<Result<AppendLogsReply>>> = self
             .peers
             .iter()
             .enumerate()
             .filter(|(peer_id, _)| *peer_id != me)
             .map(|(peer_id, _)| self.append_logs_to_peer(peer_id))
-            .collect::<FuturesUnordered<Receiver<Result<AppendLogsReply>>>>();
-        task::spawn(async move {
-            while let Some(reply) = futures.next().await {
+            .collect::<Vec<Receiver<Result<AppendLogsReply>>>>();
+
+        for receiver in receivers {
+            let sender = action_sender.clone();
+            tokio::spawn(async move {
+                let reply = receiver.await;
                 if let Ok(reply) = reply {
                     if let Ok(reply) = reply {
-                        if !action_sender.is_closed() {
-                            action_sender
+                        if !sender.is_closed() {
+                            sender
                                 .clone()
                                 .unbounded_send(Action::AppendLogsResult(reply))
                                 .map_err(|_| ())
@@ -402,8 +408,8 @@ impl RaftPeer {
                         }
                     }
                 }
-            }
-        });
+            });
+        }
     }
 
     /// Append logs to peer.

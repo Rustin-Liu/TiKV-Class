@@ -7,8 +7,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use tokio::task;
-use tokio::time;
 
 pub struct RaftSever {
     pub raft: RaftPeer,
@@ -34,10 +32,7 @@ impl RaftSever {
                 last_receive_time,
             )
         });
-        task::spawn(RaftSever::apply_timer(
-            apply_timer_sender,
-            dead_for_apply_timer,
-        ));
+        thread::spawn(|| RaftSever::apply_timer(apply_timer_sender, dead_for_apply_timer));
         let mut msg_receiver = self.action_receiver.lock().unwrap();
         loop {
             if self.raft.dead.load(Ordering::SeqCst) {
@@ -80,7 +75,7 @@ impl RaftSever {
                             let is_leader = Arc::clone(&self.raft.is_leader);
                             let sender = self.action_sender.clone();
                             self.raft.append_logs_to_peers(sender.clone());
-                            task::spawn(RaftSever::append_timer(sender, is_leader));
+                            thread::spawn(|| RaftSever::append_timer(sender, is_leader));
                         }
                         Action::Start(command_buf, sender) => {
                             info!("{}: Got a start action", self.raft.me);
@@ -122,16 +117,19 @@ impl RaftSever {
             let start_time = Instant::now();
             let election_timeout = thread_rng().gen_range(0, 300);
             thread::sleep(Duration::from_millis(
-                HEARTBEAT_INTERVAL * 2 + election_timeout,
+                HEARTBEAT_INTERVAL * 4 + election_timeout,
             ));
             if dead.load(Ordering::SeqCst) {
                 return;
             }
             if !is_leader.load(Ordering::SeqCst) {
-                let last_receive_time = last_receive_time.lock().unwrap();
-                let timeout = last_receive_time
-                    .checked_duration_since(start_time)
-                    .is_none();
+                let timeout = {
+                    let last_receive_time = last_receive_time.lock().unwrap();
+                    last_receive_time
+                        .checked_duration_since(start_time)
+                        .is_none()
+                };
+
                 if timeout && !action_sender.is_closed() {
                     action_sender
                         .clone()
@@ -143,10 +141,8 @@ impl RaftSever {
         }
     }
 
-    async fn apply_timer(action_sender: UnboundedSender<Action>, dead: Arc<AtomicBool>) {
-        let mut interval = time::interval(Duration::from_millis(APPLY_INTERVAL));
+    fn apply_timer(action_sender: UnboundedSender<Action>, dead: Arc<AtomicBool>) {
         loop {
-            interval.tick().await;
             if dead.load(Ordering::SeqCst) {
                 return;
             }
@@ -157,13 +153,12 @@ impl RaftSever {
                     .map_err(|_| ())
                     .unwrap_or_else(|_| ());
             }
+            thread::sleep(Duration::from_millis(APPLY_INTERVAL))
         }
     }
 
-    async fn append_timer(action_sender: UnboundedSender<Action>, is_leader: Arc<AtomicBool>) {
-        let mut interval = time::interval(Duration::from_millis(HEARTBEAT_INTERVAL));
+    fn append_timer(action_sender: UnboundedSender<Action>, is_leader: Arc<AtomicBool>) {
         loop {
-            interval.tick().await;
             if !is_leader.load(Ordering::SeqCst) {
                 return;
             }
@@ -174,6 +169,7 @@ impl RaftSever {
                     .map_err(|_| ())
                     .unwrap_or_else(|_| ());
             }
+            thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL))
         }
     }
 }
