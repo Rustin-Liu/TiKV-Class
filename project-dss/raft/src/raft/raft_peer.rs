@@ -366,6 +366,12 @@ impl RaftPeer {
                                     .map_err(|_| ())
                                     .unwrap_or_else(|_| ());
                             }
+                        } else if !action_sender.is_closed() {
+                            action_sender
+                                .clone()
+                                .unbounded_send(Action::ElectionFailed(reply))
+                                .map_err(|_| ())
+                                .unwrap_or_else(|_| ());
                         }
                     }
                 }

@@ -48,4 +48,5 @@ pub enum Action {
     StartAppendLogs,
     AppendLogsResult(AppendLogsReply),
     ElectionSuccess,
+    ElectionFailed(RequestVoteReply),
 }

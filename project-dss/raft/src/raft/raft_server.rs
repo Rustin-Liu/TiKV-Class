@@ -5,10 +5,10 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use rand::{thread_rng, Rng};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 use tokio::task;
 use tokio::time;
-use tokio::time::delay_for;
 
 pub struct RaftSever {
     pub raft: RaftPeer,
@@ -26,12 +26,14 @@ impl RaftSever {
         let dead_for_election_timer = Arc::clone(&self.raft.dead);
         let dead_for_apply_timer = Arc::clone(&self.raft.dead);
         let last_receive_time = Arc::clone(&self.last_receive_time);
-        task::spawn(RaftSever::election_timer(
-            election_timer_sender,
-            is_leader_for_server,
-            dead_for_election_timer,
-            last_receive_time,
-        ));
+        thread::spawn(|| {
+            RaftSever::election_timer(
+                election_timer_sender,
+                is_leader_for_server,
+                dead_for_election_timer,
+                last_receive_time,
+            )
+        });
         task::spawn(RaftSever::apply_timer(
             apply_timer_sender,
             dead_for_apply_timer,
@@ -46,18 +48,22 @@ impl RaftSever {
                 match msg {
                     Some(msg) => match msg {
                         Action::RequestVote(args, sender) => {
+                            {
+                                let mut last_update_time = self.last_receive_time.lock().unwrap();
+                                *last_update_time = Instant::now();
+                            }
                             info!("{}: Got a request vote action", self.raft.me);
                             let reply = self.raft.handle_request_vote(&args);
-                            let mut last_update_time = self.last_receive_time.lock().unwrap();
-                            *last_update_time = Instant::now();
                             sender.send(reply).unwrap_or_else(|_| {
                                 info!("PRC ERROR {}: send RequestVoteReply error", self.raft.me);
                             })
                         }
                         Action::AppendLogs(args, sender) => {
+                            {
+                                let mut last_update_time = self.last_receive_time.lock().unwrap();
+                                *last_update_time = Instant::now();
+                            }
                             let reply = self.raft.handle_append_logs(&args);
-                            let mut last_update_time = self.last_receive_time.lock().unwrap();
-                            *last_update_time = Instant::now();
                             sender.send(reply).unwrap_or_else(|_| {
                                 info!("PRC ERROR {}: send AppendLogsReply error", self.raft.me);
                             })
@@ -91,6 +97,14 @@ impl RaftSever {
                         Action::AppendLogsResult(reply) => {
                             self.raft.handle_append_logs_reply(reply);
                         }
+                        Action::ElectionFailed(reply) => {
+                            info!("{}: Got a election failed action", self.raft.me);
+                            {
+                                let mut last_update_time = self.last_receive_time.lock().unwrap();
+                                *last_update_time = Instant::now();
+                            }
+                            self.raft.convert_to_follower(reply.term)
+                        }
                     },
                     None => info!("Got a none msg"),
                 }
@@ -98,7 +112,7 @@ impl RaftSever {
         }
     }
 
-    async fn election_timer(
+    fn election_timer(
         action_sender: UnboundedSender<Action>,
         is_leader: Arc<AtomicBool>,
         dead: Arc<AtomicBool>,
@@ -107,10 +121,9 @@ impl RaftSever {
         loop {
             let start_time = Instant::now();
             let election_timeout = thread_rng().gen_range(0, 300);
-            delay_for(Duration::from_millis(
+            thread::sleep(Duration::from_millis(
                 HEARTBEAT_INTERVAL * 2 + election_timeout,
-            ))
-            .await;
+            ));
             if dead.load(Ordering::SeqCst) {
                 return;
             }
