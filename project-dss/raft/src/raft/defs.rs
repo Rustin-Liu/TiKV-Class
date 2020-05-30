@@ -42,7 +42,6 @@ impl Default for Role {
 pub enum Action {
     RequestVote(RequestVoteArgs, Sender<RequestVoteReply>),
     AppendLogs(AppendLogsArgs, Sender<AppendLogsReply>),
-    KickOffElection,
     Start(Vec<u8>, Sender<Result<(u64, u64)>>),
     Apply,
     StartAppendLogs,

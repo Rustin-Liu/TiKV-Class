@@ -1,8 +1,9 @@
-use crate::raft::defs::Action;
+use crate::raft::defs::{Action, Role};
 use crate::raft::raft_peer::RaftPeer;
 use crate::raft::{APPLY_INTERVAL, HEARTBEAT_INTERVAL};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use rand::{thread_rng, Rng};
+use std::ops::Sub;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -12,28 +13,16 @@ pub struct RaftSever {
     pub raft: RaftPeer,
     pub action_sender: UnboundedSender<Action>,
     pub action_receiver: Arc<Mutex<UnboundedReceiver<Action>>>,
-    pub last_receive_time: Arc<Mutex<Instant>>,
 }
 
 impl RaftSever {
     #[tokio::main]
     pub async fn action_handler(&mut self) {
-        let election_timer_sender = self.action_sender.clone();
         let apply_timer_sender = self.action_sender.clone();
-        let is_leader_for_server = Arc::clone(&self.raft.is_leader);
-        let dead_for_election_timer = Arc::clone(&self.raft.dead);
         let dead_for_apply_timer = Arc::clone(&self.raft.dead);
-        let last_receive_time = Arc::clone(&self.last_receive_time);
-        thread::spawn(|| {
-            RaftSever::election_timer(
-                election_timer_sender,
-                is_leader_for_server,
-                dead_for_election_timer,
-                last_receive_time,
-            )
-        });
         thread::spawn(|| RaftSever::apply_timer(apply_timer_sender, dead_for_apply_timer));
         let mut msg_receiver = self.action_receiver.lock().unwrap();
+
         loop {
             if self.raft.dead.load(Ordering::SeqCst) {
                 return;
@@ -43,10 +32,6 @@ impl RaftSever {
                 match msg {
                     Some(msg) => match msg {
                         Action::RequestVote(args, sender) => {
-                            {
-                                let mut last_update_time = self.last_receive_time.lock().unwrap();
-                                *last_update_time = Instant::now();
-                            }
                             info!("{}: Got a request vote action", self.raft.me);
                             let reply = self.raft.handle_request_vote(&args);
                             sender.send(reply).unwrap_or_else(|_| {
@@ -54,20 +39,10 @@ impl RaftSever {
                             })
                         }
                         Action::AppendLogs(args, sender) => {
-                            {
-                                let mut last_update_time = self.last_receive_time.lock().unwrap();
-                                *last_update_time = Instant::now();
-                            }
                             let reply = self.raft.handle_append_logs(&args);
                             sender.send(reply).unwrap_or_else(|_| {
                                 info!("PRC ERROR {}: send AppendLogsReply error", self.raft.me);
                             })
-                        }
-                        Action::KickOffElection => {
-                            info!("{}: Got a kick off election action", self.raft.me);
-                            self.raft.convert_to_candidate();
-                            let sender = self.action_sender.clone();
-                            self.raft.kick_off_election(sender.clone());
                         }
                         Action::ElectionSuccess => {
                             info!("{}: Election success", self.raft.me);
@@ -93,50 +68,28 @@ impl RaftSever {
                             self.raft.handle_append_logs_reply(reply);
                         }
                         Action::ElectionFailed(reply) => {
-                            info!("{}: Got a election failed action", self.raft.me);
-                            {
-                                let mut last_update_time = self.last_receive_time.lock().unwrap();
-                                *last_update_time = Instant::now();
-                            }
+                            self.raft.last_receive_time = Instant::now();
                             self.raft.convert_to_follower(reply.term)
                         }
                     },
                     None => info!("Got a none msg"),
                 }
             }
-        }
-    }
 
-    fn election_timer(
-        action_sender: UnboundedSender<Action>,
-        is_leader: Arc<AtomicBool>,
-        dead: Arc<AtomicBool>,
-        last_receive_time: Arc<Mutex<Instant>>,
-    ) {
-        loop {
-            let start_time = Instant::now();
-            let election_timeout = thread_rng().gen_range(0, 300);
-            thread::sleep(Duration::from_millis(
-                HEARTBEAT_INTERVAL * 4 + election_timeout,
-            ));
-            if dead.load(Ordering::SeqCst) {
-                return;
-            }
-            if !is_leader.load(Ordering::SeqCst) {
-                let timeout = {
-                    let last_receive_time = last_receive_time.lock().unwrap();
-                    last_receive_time
-                        .checked_duration_since(start_time)
-                        .is_none()
-                };
-
-                if timeout && !action_sender.is_closed() {
-                    action_sender
-                        .clone()
-                        .unbounded_send(Action::KickOffElection)
-                        .map_err(|_| ())
-                        .unwrap_or_else(|_| ());
-                }
+            let now = Instant::now();
+            if self.raft.role == Role::Follower
+                && self
+                    .raft
+                    .last_receive_time
+                    .checked_duration_since(now.sub(Duration::from_millis(
+                        HEARTBEAT_INTERVAL * 5 + thread_rng().gen_range(0, 300),
+                    )))
+                    .is_none()
+            {
+                info!("{}: Got a kick off election action", self.raft.me);
+                self.raft.convert_to_candidate();
+                let sender = self.action_sender.clone();
+                self.raft.kick_off_election(sender.clone());
             }
         }
     }

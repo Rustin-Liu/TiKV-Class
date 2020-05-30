@@ -9,7 +9,6 @@ use futures::channel::oneshot::{channel, Canceled};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Instant;
 use tokio::runtime::Runtime;
 
 #[derive(Clone)]
@@ -25,7 +24,6 @@ impl Node {
     pub fn new(raft: RaftPeer) -> Node {
         let (sender, receiver) = unbounded::<Action>();
         let node_sender = sender.clone();
-        let last_receive_time = Arc::new(Mutex::new(Instant::now()));
         let current_term = Arc::clone(&raft.current_term);
         let is_leader_for_node = Arc::clone(&raft.is_leader);
         let dead_for_node = Arc::clone(&raft.dead);
@@ -33,7 +31,6 @@ impl Node {
             raft,
             action_sender: sender,
             action_receiver: Arc::new(Mutex::new(receiver)),
-            last_receive_time,
         };
         thread::spawn(move || server.action_handler());
         Node {
