@@ -3,11 +3,12 @@ use crate::raft::raft_peer::RaftPeer;
 use crate::raft::{APPLY_INTERVAL, HEARTBEAT_INTERVAL};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use rand::{thread_rng, Rng};
-use std::ops::Sub;
+use std::ops::Add;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use tokio::time::delay_for;
 
 pub struct RaftSever {
     pub raft: RaftPeer,
@@ -22,7 +23,9 @@ impl RaftSever {
         let dead_for_apply_timer = Arc::clone(&self.raft.dead);
         thread::spawn(|| RaftSever::apply_timer(apply_timer_sender, dead_for_apply_timer));
         let mut msg_receiver = self.action_receiver.lock().unwrap();
-
+        let mut delay = delay_for(Duration::from_millis(
+            HEARTBEAT_INTERVAL * 5 + thread_rng().gen_range(0, 300),
+        ));
         loop {
             if self.raft.dead.load(Ordering::SeqCst) {
                 return;
@@ -32,17 +35,23 @@ impl RaftSever {
                 match msg {
                     Some(msg) => match msg {
                         Action::RequestVote(args, sender) => {
+                            delay.reset(tokio::time::Instant::from(
+                                self.gen_random_election_timeout(),
+                            ));
                             info!("{}: Got a request vote action", self.raft.me);
                             let reply = self.raft.handle_request_vote(&args);
                             sender.send(reply).unwrap_or_else(|_| {
                                 info!("PRC ERROR {}: send RequestVoteReply error", self.raft.me);
-                            })
+                            });
                         }
                         Action::AppendLogs(args, sender) => {
+                            delay.reset(tokio::time::Instant::from(
+                                self.gen_random_election_timeout(),
+                            ));
                             let reply = self.raft.handle_append_logs(&args);
                             sender.send(reply).unwrap_or_else(|_| {
                                 info!("PRC ERROR {}: send AppendLogsReply error", self.raft.me);
-                            })
+                            });
                         }
                         Action::ElectionSuccess => {
                             info!("{}: Election success", self.raft.me);
@@ -65,10 +74,15 @@ impl RaftSever {
                             self.raft.append_logs_to_peers(sender);
                         }
                         Action::AppendLogsResult(reply) => {
+                            delay.reset(tokio::time::Instant::from(
+                                self.gen_random_election_timeout(),
+                            ));
                             self.raft.handle_append_logs_reply(reply);
                         }
                         Action::ElectionFailed(reply) => {
-                            self.raft.last_receive_time = Instant::now();
+                            delay.reset(tokio::time::Instant::from(
+                                self.gen_random_election_timeout(),
+                            ));
                             self.raft.convert_to_follower(reply.term)
                         }
                     },
@@ -76,22 +90,23 @@ impl RaftSever {
                 }
             }
 
-            let now = Instant::now();
-            if self.raft.role == Role::Follower
-                && self
-                    .raft
-                    .last_receive_time
-                    .checked_duration_since(now.sub(Duration::from_millis(
-                        HEARTBEAT_INTERVAL * 5 + thread_rng().gen_range(0, 300),
-                    )))
-                    .is_none()
-            {
+            if self.raft.role == Role::Follower && delay.is_elapsed() {
                 info!("{}: Got a kick off election action", self.raft.me);
                 self.raft.convert_to_candidate();
                 let sender = self.action_sender.clone();
                 self.raft.kick_off_election(sender.clone());
+                delay.reset(tokio::time::Instant::from(
+                    self.gen_random_election_timeout(),
+                ));
             }
         }
+    }
+
+    fn gen_random_election_timeout(&self) -> Instant {
+        let now = Instant::now();
+        now.add(Duration::from_millis(
+            HEARTBEAT_INTERVAL * 5 + thread_rng().gen_range(0, 300),
+        ))
     }
 
     fn apply_timer(action_sender: UnboundedSender<Action>, dead: Arc<AtomicBool>) {

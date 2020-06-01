@@ -9,7 +9,6 @@ use futures::TryFutureExt;
 use std::cmp;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
 
 // A single Raft peer.
 pub struct RaftPeer {
@@ -41,7 +40,6 @@ pub struct RaftPeer {
     pub matched_indexes: Vec<usize>,
     // Is a channel on which the tester or service expects Raft to send ApplyMsg messages.
     pub apply_ch: UnboundedSender<ApplyMsg>,
-    pub last_receive_time: Instant,
 }
 
 impl RaftPeer {
@@ -80,7 +78,6 @@ impl RaftPeer {
             next_indexes: (0..peers_len).map(|_| 0).collect(),
             matched_indexes: (0..peers_len).map(|_| 0).collect(),
             apply_ch,
-            last_receive_time: Instant::now(),
         };
         rf.restore(&raft_state);
         rf
@@ -88,7 +85,6 @@ impl RaftPeer {
 
     /// Convert it self to candidate.
     pub fn convert_to_candidate(&mut self) {
-        self.last_receive_time = Instant::now();
         self.role = Role::Candidate;
         self.current_term.fetch_add(1, Ordering::SeqCst);
         self.voted_for = Some(self.me);
@@ -97,7 +93,6 @@ impl RaftPeer {
 
     /// Convert it self to follower.
     pub fn convert_to_follower(&mut self, new_term: u64) {
-        self.last_receive_time = Instant::now();
         self.role = Role::Follower;
         self.current_term.store(new_term, Ordering::SeqCst);
         self.voted_for = None;
@@ -106,7 +101,6 @@ impl RaftPeer {
 
     /// Convert it self to leader and init index.
     pub fn convert_to_leader(&mut self) {
-        self.last_receive_time = Instant::now();
         self.init_index();
         self.role = Role::Leader;
         self.is_leader.store(true, Ordering::SeqCst);
@@ -255,7 +249,6 @@ impl RaftPeer {
 
     /// Handle the vote request.
     pub fn handle_request_vote(&mut self, args: &RequestVoteArgs) -> RequestVoteReply {
-        self.last_receive_time = Instant::now();
         let mut reply = RequestVoteReply::default();
         let current_term = self.current_term.load(Ordering::SeqCst);
 
@@ -285,7 +278,6 @@ impl RaftPeer {
 
     /// Handle append logs request.
     pub fn handle_append_logs(&mut self, args: &AppendLogsArgs) -> AppendLogsReply {
-        self.last_receive_time = Instant::now();
         let me = self.me;
         let current_term = self.current_term.load(Ordering::SeqCst);
         let mut reply = AppendLogsReply {
